@@ -1,0 +1,101 @@
+````markdown
+# 📊 Data Analysis Dashboard
+
+Professional data analysis dashboard with support for CSV, Excel, and PDF files. Built with React, Vite, and Recharts.
+
+## ✨ Features
+
+- 📁 Upload CSV, Excel (.xlsx, .xls), and PDF files
+- 📊 Interactive charts (Line, Bar, Pie)
+- 📈 Statistical analysis and insights
+- 🎨 Beautiful gradient UI with dark theme
+- 📱 Fully responsive design
+- ⚡ Fast performance with Vite
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 16+ installed
+- npm or yarn
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone <your-repo-url>
+cd data-analysis-dashboard
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Run development server:
+```bash
+npm run dev
+```
+
+4. Build for production:
+```bash
+npm run build
+```
+
+## 🌐 Deploy to Vercel
+
+1. Push your code to GitHub
+2. Go to [Vercel](https://vercel.com)
+3. Click "New Project"
+4. Import your GitHub repository
+5. Vercel will auto-detect Vite settings
+6. Click "Deploy"
+
+## 👥 Developers
+
+- **Amarjeet Kumar** - Reg No: 22155135005
+- **Kartik Raj** - Reg No: 22155135023
+- **Shanu Kumar** - Reg No: 22155135026
+- **Krishna Murari** - Reg No: 22155135054
+
+**College:** Government Engineering College Vaishali  
+**Course:** CSE (IOT)
+
+## 📄 License
+
+MIT License
+````
+
+---
+
+## 🚀 GitHub Upload & Vercel Deploy Steps:
+
+### 1. **Create GitHub Repository**
+````bash
+# Terminal mein ye commands run karo:
+git init
+git add .
+git commit -m "Initial commit: Data Analysis Dashboard"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/data-analysis-dashboard.git
+git push -u origin main
+````
+
+### 2. **Vercel Deploy**
+1. [vercel.com](https://vercel.com) par jao
+2. "New Project" click karo
+3. GitHub repository import karo
+4. Auto-detect hoga (Vite framework)
+5. "Deploy" button click karo
+6. 2-3 minutes mein live ho jayega! 🎉
+
+---
+
+## ✅ Checklist Before Upload:
+
+- [ ] Sabhi files correct location par hai
+- [ ] `package.json` mein dependencies sahi hai
+- [ ] `.gitignore` file add kiya
+- [ ] `vercel.json` configuration file hai
+- [ ] README.md complete hai
+
+Ye complete structure Vercel par **smoothly deploy** hoga bina kisi error ke! 🚀
