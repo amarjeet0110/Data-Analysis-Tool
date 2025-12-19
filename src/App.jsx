@@ -306,19 +306,15 @@ const DataAnalysisDashboard = () => {
               </div>
               
               {selectedDeveloper.portfolio && (
-                
-                  href={selectedDeveloper.portfolio}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
-                   <a>
-                  View Portfolio
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+  
+    href={selectedDeveloper.portfolio}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
+  >
+    View Portfolio
+  </a>
+)}
 
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-800 to-purple-900 border-b border-purple-500/30 shadow-2xl">
