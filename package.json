@@ -1,6 +1,7 @@
 {
   "name": "data-analysis-dashboard",
   "version": "1.0.0",
+  "type": "module",
   "description": "Professional Data Analysis Dashboard with CSV, Excel, and PDF support",
   "private": true,
   "dependencies": {
