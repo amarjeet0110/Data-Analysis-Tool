@@ -537,8 +537,7 @@ const DataAnalysisDashboard = () => {
                           <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.
-                        3} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
 <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#c4b5fd' }} />
 <YAxis tick={{ fontSize: 12, fill: '#c4b5fd' }} />
 <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px' }} />
