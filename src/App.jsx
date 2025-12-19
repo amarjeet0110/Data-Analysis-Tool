@@ -57,9 +57,12 @@ const DataAnalysisDashboard = () => {
         dynamicTyping: true,
         skipEmptyLines: true,
         complete: (results) => {
+          const validData = results.data.filter(row => 
+            Object.values(row).some(val => val !== null && val !== undefined && val !== '')
+          );
           resolve({
-            data: results.data,
-            headers: Object.keys(results.data[0] || {})
+            data: validData.length > 0 ? validData : results.data,
+            headers: Object.keys(results.data[0] || {}).map(h => h.trim())
           });
         }
       });
@@ -70,9 +73,19 @@ const DataAnalysisDashboard = () => {
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+    
+    const headers = Object.keys(jsonData[0] || {}).map(h => h.trim());
+    const cleanedData = jsonData.map(row => {
+      const cleanRow = {};
+      Object.keys(row).forEach(key => {
+        cleanRow[key.trim()] = row[key];
+      });
+      return cleanRow;
+    });
+    
     return {
-      data: jsonData,
-      headers: Object.keys(jsonData[0] || {})
+      data: cleanedData,
+      headers: headers
     };
   };
 
@@ -107,8 +120,13 @@ const DataAnalysisDashboard = () => {
 
   const generateInsights = (data, headers) => {
     const insights = [];
+    
+    if (!data || data.length === 0 || !headers || headers.length === 0) {
+      return insights;
+    }
+    
     const numericCols = headers.filter(h => 
-      data.some(row => typeof row[h] === 'number')
+      data.some(row => row[h] !== null && row[h] !== undefined && typeof row[h] === 'number')
     );
 
     if (data.length > 0) {
@@ -120,7 +138,7 @@ const DataAnalysisDashboard = () => {
     }
 
     numericCols.forEach(col => {
-      const values = data.map(row => row[col]).filter(v => typeof v === 'number');
+      const values = data.map(row => row[col]).filter(v => typeof v === 'number' && !isNaN(v));
       if (values.length > 0) {
         const sum = values.reduce((a, b) => a + b, 0);
         const avg = sum / values.length;
@@ -137,24 +155,42 @@ const DataAnalysisDashboard = () => {
 
     const categoricalCols = headers.filter(h => !numericCols.includes(h));
     categoricalCols.slice(0, 2).forEach(col => {
-      const uniqueValues = [...new Set(data.map(row => row[col]))].length;
-      insights.push({
-        type: 'info',
-        title: `${col} Categories`,
-        description: `${uniqueValues} unique values found`
-      });
+      const uniqueValues = [...new Set(data.map(row => row[col]).filter(v => v !== null && v !== undefined))].length;
+      if (uniqueValues > 0) {
+        insights.push({
+          type: 'info',
+          title: `${col} Categories`,
+          description: `${uniqueValues} unique values found`
+        });
+      }
     });
 
     return insights;
   };
 
   const calculateStats = (data, headers) => {
+    if (!data || data.length === 0 || !headers || headers.length === 0) {
+      return [];
+    }
+    
     const numericCols = headers.filter(h => 
-      data.some(row => typeof row[h] === 'number')
+      data.some(row => row[h] !== null && row[h] !== undefined && typeof row[h] === 'number')
     );
 
     return numericCols.map(col => {
-      const values = data.map(row => row[col]).filter(v => typeof v === 'number');
+      const values = data.map(row => row[col]).filter(v => typeof v === 'number' && !isNaN(v));
+      
+      if (values.length === 0) {
+        return {
+          name: col,
+          average: '0.00',
+          total: '0.00',
+          max: 0,
+          min: 0,
+          count: 0
+        };
+      }
+      
       const sum = values.reduce((a, b) => a + b, 0);
       const avg = sum / values.length;
       const max = Math.max(...values);
@@ -195,6 +231,14 @@ const DataAnalysisDashboard = () => {
       } else {
         alert('Please upload CSV, Excel (.xlsx, .xls), or PDF file');
         setLoading(false);
+        setFile(null);
+        return;
+      }
+
+      if (!result.data || result.data.length === 0) {
+        alert('No data found in the file. Please check the file format.');
+        setLoading(false);
+        setFile(null);
         return;
       }
 
@@ -204,7 +248,12 @@ const DataAnalysisDashboard = () => {
       setStats(calculateStats(result.data, result.headers));
     } catch (error) {
       console.error('Error processing file:', error);
-      alert('Error processing file. Please check file format.');
+      alert('Error processing file. Please check file format and try again.');
+      setFile(null);
+      setData(null);
+      setHeaders([]);
+      setInsights([]);
+      setStats(null);
     }
 
     setLoading(false);
@@ -236,17 +285,17 @@ const DataAnalysisDashboard = () => {
     return data.slice(0, 20).map((row, idx) => {
       const item = { name: `Row ${idx + 1}` };
       numericCols.forEach(col => {
-        item[col] = row[col];
+        item[col] = typeof row[col] === 'number' ? row[col] : 0;
       });
       return item;
     });
   };
 
   const getPieData = () => {
-    if (!data || headers.length === 0) return [];
+    if (!data || data.length === 0 || headers.length === 0) return [];
     
     const categoricalCol = headers.find(h => 
-      data.every(row => typeof row[h] === 'string')
+      data.every(row => row[h] && typeof row[h] === 'string')
     );
 
     if (!categoricalCol) return [];
@@ -254,7 +303,9 @@ const DataAnalysisDashboard = () => {
     const counts = {};
     data.forEach(row => {
       const val = row[categoricalCol];
-      counts[val] = (counts[val] || 0) + 1;
+      if (val) {
+        counts[val] = (counts[val] || 0) + 1;
+      }
     });
 
     return Object.entries(counts).slice(0, 6).map(([name, value]) => ({
@@ -306,20 +357,19 @@ const DataAnalysisDashboard = () => {
               </div>
               
               {selectedDeveloper.portfolio && (
-          <a
-  
-    href={selectedDeveloper.portfolio}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
-  >
-    View Portfolio
-  </a>
-          </div>
+                <a
+                  href={selectedDeveloper.portfolio}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
+                >
+                  View Portfolio
+                </a>
+              )}
+            </div>
           </div>
         </div>
       )}
-
 
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-800 to-purple-900 border-b border-purple-500/30 shadow-2xl">
@@ -525,158 +575,172 @@ const DataAnalysisDashboard = () => {
             )}
 
             {/* Charts Tab */}
-            {activeTab === 'charts' && chartData.length > 0 && (
+            {activeTab === 'charts' && (
               <div className="space-y-6 sm:space-y-8">
-                {/* Line Chart */}
-                <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
-                  <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400" />
-                    Trend Analysis
-                  </h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <AreaChart data={chartData}>
-                      <defs>
-                        <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#a855f7" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
-<XAxis dataKey="name" tick={{ fontSize: 12, fill: '#c4b5fd' }} />
-<YAxis tick={{ fontSize: 12, fill: '#c4b5fd' }} />
-<Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px' }} />
-<Legend wrapperStyle={{ fontSize: 12 }} />
-{numericHeaders.slice(0, 1).map((header, idx) => (
-<Area
-                       key={idx}
-                       type="monotone"
-                       dataKey={header}
-                       stroke="#a855f7"
-                       fillOpacity={1}
-                       fill="url(#colorGradient)"
-                     />
-))}
-</AreaChart>
-</ResponsiveContainer>
-</div>
-                {/* Bar Chart */}
-            <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
-              <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400" />
-                Comparison Chart
-              </h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
-                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#c4b5fd' }} />
-                  <YAxis tick={{ fontSize: 12, fill: '#c4b5fd' }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px' }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  {numericHeaders.slice(0, 3).map((header, idx) => (
-                    <Bar key={idx} dataKey={header} fill={COLORS[idx]} />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+                {chartData.length > 0 && numericHeaders.length > 0 ? (
+                  <>
+                    {/* Line Chart */}
+                    <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
+                      <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400" />
+                        Trend Analysis
+                      </h3>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart data={chartData}>
+                          <defs>
+                            <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#a855f7" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
+                          <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#c4b5fd' }} />
+                          <YAxis tick={{ fontSize: 12, fill: '#c4b5fd' }} />
+                          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px' }} />
+                          <Legend wrapperStyle={{ fontSize: 12 }} />
+                          {numericHeaders.slice(0, 1).map((header, idx) => (
+                            <Area
+                              key={idx}
+                              type="monotone"
+                              dataKey={header}
+                              stroke="#a855f7"
+                              fillOpacity={1}
+                              fill="url(#colorGradient)"
+                            />
+                          ))}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
 
-            {/* Pie Chart */}
-            {pieData.length > 0 && (
-              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
-                <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-pink-400" />
-                  Distribution Analysis
-                </h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
+                    {/* Bar Chart */}
+                    <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
+                      <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400" />
+                        Comparison Chart
+                      </h3>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
+                          <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#c4b5fd' }} />
+                          <YAxis tick={{ fontSize: 12, fill: '#c4b5fd' }} />
+                          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px' }} />
+                          <Legend wrapperStyle={{ fontSize: 12 }} />
+                          {numericHeaders.slice(0, 3).map((header, idx) => (
+                            <Bar key={idx} dataKey={header} fill={COLORS[idx]} />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Pie Chart */}
+                    {pieData.length > 0 && (
+                      <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
+                        <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-pink-400" />
+                          Distribution Analysis
+                        </h3>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <PieChart>
+                            <Pie
+                              data={pieData}
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                              outerRadius={80}
+                              fill="#8884d8"
+                              dataKey="value"
+                            >
+                              {pieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px' }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-8 text-center border border-purple-500/30">
+                    <AlertCircle className="w-16 h-16 text-purple-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-bold text-white mb-2">No Numeric Data Available</h3>
+                    <p className="text-purple-200">
+                      Charts require numeric data. Your file doesn't contain columns with numeric values.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Data Tab */}
-        {activeTab === 'data' && (
-          <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
-            <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-              <Eye className="w-5 h-5 sm:w-6 sm:h-6 text-green-400" />
-              Raw Data Preview (First 50 rows)
-            </h3>
-            <div className="overflow-x-auto -mx-4 sm:mx-0">
-              <div className="inline-block min-w-full align-middle">
-                <table className="min-w-full divide-y divide-purple-500/30">
-                  <thead className="bg-slate-700/50">
-                    <tr>
-                      {headers.map((header, idx) => (
-                        <th
-                          key={idx}
-                          className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider whitespace-nowrap"
-                        >
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-purple-500/20">
-                    {data.slice(0, 50).map((row, idx) => (
-                      <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
-                        {headers.map((header, hIdx) => (
-                          <td
-                            key={hIdx}
-                            className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-purple-200"
-                          >
-                            {row[header] !== null && row[header] !== undefined
-                              ? String(row[header])
-                              : '-'}
-                          </td>
+            {/* Data Tab */}
+            {activeTab === 'data' && (
+              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
+                <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
+                  <Eye className="w-5 h-5 sm:w-6 sm:h-6 text-green-400" />
+                  Raw Data Preview (First 50 rows)
+                </h3>
+                <div className="overflow-x-auto -mx-4 sm:mx-0">
+                  <div className="inline-block min-w-full align-middle">
+                    <table className="min-w-full divide-y divide-purple-500/30">
+                      <thead className="bg-slate-700/50">
+                        <tr>
+                          {headers.map((header, idx) => (
+                            <th
+                              key={idx}
+                              className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider whitespace-nowrap"
+                            >
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-purple-500/20">
+                        {data.slice(0, 50).map((row, idx) => (
+                          <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
+                            {headers.map((header, hIdx) => (
+                              <td
+                                key={hIdx}
+                                className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-purple-200"
+                              >
+                                {row[header] !== null && row[header] !== undefined
+                                  ? String(row[header])
+                                  : '-'}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+          </>
         )}
-      </>
-    )}
-  </div>
+      </div>
 
-  {/* Footer */}
-  <div className="border-t border-purple-500/30 bg-gradient-to-r from-slate-800 to-purple-900 mt-8">
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-      <p className="text-center text-xs text-purple-300/80">
-        Developed by:{' '}
-        {developers.map((dev, idx) => (
-          <React.Fragment key={dev.name}>
-            <button
-              onClick={() => handleDeveloperClick(dev)}
-              className="text-purple-400 hover:text-purple-300 underline decoration-dotted hover:decoration-solid transition-all"
-            >
-              {dev.name}
-            </button>
-            {idx < developers.length - 1 && <span className="mx-2">•</span>}
-          </React.Fragment>
-        ))}
-      </p>
+      {/* Footer */}
+      <div className="border-t border-purple-500/30 bg-gradient-to-r from-slate-800 to-purple-900 mt-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <p className="text-center text-xs text-purple-300/80">
+            Developed by:{' '}
+            {developers.map((dev, idx) => (
+              <React.Fragment key={dev.name}>
+                <button
+                  onClick={() => handleDeveloperClick(dev)}
+                  className="text-purple-400 hover:text-purple-300 underline decoration-dotted hover:decoration-solid transition-all"
+                >
+                  {dev.name}
+                </button>
+                {idx < developers.length - 1 && <span className="mx-2">•</span>}
+              </React.Fragment>
+            ))}
+          </p>
+        </div>
+      </div>
     </div>
-  </div>
-</div>
-    );
+  );
 };
+
 export default DataAnalysisDashboard;
