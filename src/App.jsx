@@ -315,7 +315,11 @@ const DataAnalysisDashboard = () => {
   >
     View Portfolio
   </a>
-)}
+          </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-800 to-purple-900 border-b border-purple-500/30 shadow-2xl">
