@@ -311,7 +311,7 @@ const DataAnalysisDashboard = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
-                >
+                   <a>
                   View Portfolio
                 </a>
               )}
