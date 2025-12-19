@@ -306,6 +306,7 @@ const DataAnalysisDashboard = () => {
               </div>
               
               {selectedDeveloper.portfolio && (
+          <a
   
     href={selectedDeveloper.portfolio}
     target="_blank"
