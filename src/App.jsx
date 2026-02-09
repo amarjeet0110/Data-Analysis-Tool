@@ -33,7 +33,7 @@ const DataAnalysisDashboard = () => {
       regNo: '22155135005',
       course: 'CSE(IOT)',
       college: 'Government Engineering College Vaishali',
-      portfolio: 'https://vercel.com/amarjeet0110s-projects/amarjeet0110'
+      portfolio: 'https://amarjeet-portfolio-mu.vercel.app/'
     },
     {
       name: 'Kartik',
