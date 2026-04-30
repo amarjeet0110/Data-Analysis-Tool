@@ -92,6 +92,7 @@ export default function Dashboard() {
 
   // ── File Processing ────────────────────────────────────────────────────────
   const processFile = async (uploadedFile) => {
+    setIsDragging(false);
     setFile(uploadedFile);
     setLoading(true);
     setActiveTab('overview');
@@ -127,7 +128,9 @@ export default function Dashboard() {
   const onDragOver = useCallback((e) => { e.preventDefault(); setIsDragging(true); }, []);
   const onDragLeave = useCallback(() => setIsDragging(false), []);
   const onDrop = useCallback((e) => {
-    e.preventDefault(); setIsDragging(false);
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
     const f = e.dataTransfer.files[0];
     if (f) processFile(f);
   }, []);
@@ -352,7 +355,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900"
-      onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+      onDragOver={!loading ? onDragOver : undefined} onDragLeave={!loading ? onDragLeave : undefined} onDrop={!loading ? onDrop : undefined}>
 
       {/* Drag Overlay */}
       {isDragging && (
@@ -422,7 +425,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-center py-24">
             <div className="text-center">
               <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-500 mx-auto"></div>
-              <p className="mt-4 text-purple-200 font-medium">File process ho rahi hai...</p>
+              <p className="mt-4 text-purple-200 font-medium">Processing your file...</p>
             </div>
           </div>
         )}
