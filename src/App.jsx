@@ -30,10 +30,15 @@ const pearsonCorr = (a, b) => {
 };
 
 // ─── Claude API call ─────────────────────────────────────────────────────────
-const callClaude = async (messages, system = '') => {
+  const callClaude = async (messages, system = '') => {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': '',
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
@@ -41,6 +46,7 @@ const callClaude = async (messages, system = '') => {
       messages
     })
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   const d = await res.json();
   return d.content?.map(c => c.text || '').join('') || '';
 };
@@ -111,7 +117,7 @@ export default function Dashboard() {
       setDataQuality(analyzeQuality(result.data, result.headers));
       setAlerts(genAlerts(result.data, result.headers));
       setAiInsights(genAIInsights(result.data, result.headers));
-    } catch (e) { console.error(e); alert('File process karne mein error aaya.'); }
+    } catch (e) { console.error(e);                     alert('Error processing file. Please check the file format and try again.'); }
     setLoading(false);
   };
 
@@ -177,13 +183,13 @@ export default function Dashboard() {
     if (sc && namec) {
       const grouped = _.groupBy(d, namec);
       const top = _.maxBy(Object.entries(grouped).map(([k, v]) => ({ k, s: _.sum(v.map(r => r[sc]).filter(n => typeof n === 'number')) })), 's');
-      if (top) ins.push({ type: 'success', title: 'Top Performer', description: `${top.k} is the best seller — ${top.s.toLocaleString()} in sales`, icon: Zap });
+      if (top) ins.push({ type: 'success', title: 'Top Performer', description: `${top.k} is the best-selling product with ₹${top.s.toLocaleString('en-IN')} in sales`, icon: Zap });
     }
     if (sc && pc) {
       const ts = _.sum(d.map(r => r[sc]).filter(n => typeof n === 'number'));
       const tp = _.sum(d.map(r => r[pc]).filter(n => typeof n === 'number'));
       const m = ts > 0 ? ((tp / ts) * 100).toFixed(1) : 0;
-      ins.push({ type: m > 15 ? 'success' : 'warning', title: 'Profit Margin', description: `Overall margin: ${m}% — ${m < 15 ? 'Consider optimizing costs' : 'Healthy margin!'}`, icon: Activity });
+      ins.push({ type: m > 15 ? 'success' : 'warning', title: 'Profit Margin', description: `Overall margin: ${m}% — ${m < 15 ? 'Consider optimizing costs or pricing' : 'Healthy margin maintained!'}`, icon: Activity });
     }
     return ins;
   };
@@ -257,14 +263,14 @@ export default function Dashboard() {
     const sc = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
     if (sc) {
       const v = data.map(r => r[sc]).filter(n => typeof n === 'number');
-      kpis.push({ title: 'Total Sales', value: _.sum(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
-      kpis.push({ title: 'Avg Order', value: _.mean(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
+      kpis.push(    { title: 'Total Revenue', value: totalSales.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
+      kpis.push({ title: 'Avg Order Value', value: avgSales.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
     }
     const pc = headers.find(c => c.toLowerCase().includes('profit'));
     if (pc) {
       const v = data.map(r => r[pc]).filter(n => typeof n === 'number');
       const tot = _.sum(v);
-      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: Math.abs(tot).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
+      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: Math.abs(tot).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
     }
     const namc = headers.find(c => ['product','item','name'].some(k => c.toLowerCase().includes(k)));
     if (namc) kpis.push({ title: 'Total Products', value: new Set(data.map(r => r[namc])).size, icon: Package, color: 'from-purple-500 to-purple-600', borderColor: 'border-purple-500/30' });
@@ -314,7 +320,7 @@ export default function Dashboard() {
       const prompt = `Based on the data below, write a complete professional business analysis report:\n\nDataset Info:\n- Total rows: ${data.length}\n- Columns: ${headers.join(', ')}\n- Statistics: ${JSON.stringify(s)}\n\nReport format:\n## 📊 Executive Summary\n## 🔍 Key Findings\n## 📈 Trend Analysis\n## ⚠️ Areas of Concern\n## 💡 Recommendations\n## ✅ Conclusion\n\nInclude specific numbers and insights in each section. Keep it professional and concise.`;
       const rep = await callClaude([{ role: 'user', content: prompt }], sys);
       setReport(rep);
-    } catch (e) { setReport('❌ Error generating report. Please try again.'); }
+    } catch (e) { setReport(`❌ Error: ${e.message}. Make sure the Anthropic API key is configured.`); }
     setReportLoading(false);
   };
 
@@ -370,7 +376,7 @@ export default function Dashboard() {
               </div>
               <h3 className="text-2xl font-bold text-white mb-4">{selDev.fullName}</h3>
               <div className="text-left bg-slate-700/30 rounded-lg p-4 space-y-2 mb-4">
-                <p className="text-purple-200"><span className="font-semibold text-white">Reg No:</span> {selDev.regNo}</p>
+                                  <p className="text-xs text-purple-300 mb-1">{row.regNo}</p>
                 <p className="text-purple-200"><span className="font-semibold text-white">Course:</span> {selDev.course}</p>
                 <p className="text-purple-200"><span className="font-semibold text-white">College:</span> {selDev.college}</p>
               </div>
