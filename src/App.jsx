@@ -1,784 +1,382 @@
-import React, { useState } from 'react';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
-import { Upload, FileText, TrendingUp, BarChart3, Eye, AlertCircle, CheckCircle, Github, Home, X, AlertTriangle, Activity, DollarSign, ShoppingCart, Package, Zap, Filter } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart, ReferenceLine } from 'recharts';
+import { Upload, FileText, TrendingUp, BarChart3, Eye, AlertCircle, CheckCircle, Github, Home, X, AlertTriangle, Activity, DollarSign, ShoppingCart, Package, Zap, Filter, MessageCircle, Send, Download, Brain, RefreshCw } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import mammoth from 'mammoth';
 import _ from 'lodash';
 
-const DataAnalysisDashboard = () => {
+const COLORS = ['#8b5cf6','#ec4899','#10b981','#3b82f6','#f59e0b','#06b6d4','#f97316','#a3e635'];
+
+// ─── Linear Regression helper ───────────────────────────────────────────────
+const linearRegression = (values) => {
+  const n = values.length;
+  if (n < 2) return { slope: 0, intercept: 0, predict: (x) => values[0] || 0 };
+  const sumX = values.reduce((s, _, i) => s + i, 0);
+  const sumY = values.reduce((s, v) => s + v, 0);
+  const sumXY = values.reduce((s, v, i) => s + i * v, 0);
+  const sumX2 = values.reduce((s, _, i) => s + i * i, 0);
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  return { slope, intercept, predict: (x) => slope * x + intercept };
+};
+
+// ─── Correlation Matrix ──────────────────────────────────────────────────────
+const pearsonCorr = (a, b) => {
+  const n = a.length;
+  const ma = _.mean(a), mb = _.mean(b);
+  const num = _.sum(a.map((v, i) => (v - ma) * (b[i] - mb)));
+  const den = Math.sqrt(_.sum(a.map(v => (v - ma) ** 2)) * _.sum(b.map(v => (v - mb) ** 2)));
+  return den === 0 ? 0 : num / den;
+};
+
+// ─── Claude API call ─────────────────────────────────────────────────────────
+const callClaude = async (messages, system = '') => {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system,
+      messages
+    })
+  });
+  const d = await res.json();
+  return d.content?.map(c => c.text || '').join('') || '';
+};
+
+export default function Dashboard() {
+  // ── State ──────────────────────────────────────────────────────────────────
   const [file, setFile] = useState(null);
   const [data, setData] = useState(null);
   const [headers, setHeaders] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const [insights, setInsights] = useState([]);
   const [stats, setStats] = useState(null);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [showDeveloperModal, setShowDeveloperModal] = useState(false);
-  const [selectedDeveloper, setSelectedDeveloper] = useState(null);
-  const [selectedColumn, setSelectedColumn] = useState('');
-  const [filterValue, setFilterValue] = useState('');
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [dataQuality, setDataQuality] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [aiInsights, setAiInsights] = useState([]);
-  const [comparisonMode, setComparisonMode] = useState('month');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedRegion, setSelectedRegion] = useState('all');
+  const [isDragging, setIsDragging] = useState(false);
+  const [selectedColumn, setSelectedColumn] = useState('');
+  const [filterValue, setFilterValue] = useState('');
+  const [showDev, setShowDev] = useState(false);
+  const [selDev, setSelDev] = useState(null);
+
+  // AI Chat
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef(null);
+
+  // AI Report
+  const [report, setReport] = useState('');
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const fileInputRef = useRef(null);
 
   const developers = [
-    {
-      name: 'Amarjeet',
-      fullName: 'Amarjeet Kumar',
-      regNo: '22155135005',
-      course: 'CSE(IOT)',
-      college: 'Government Engineering College Vaishali',
-      portfolio: 'https://amarjeet-portfolio-mu.vercel.app/'
-    },
-    {
-      name: 'Kartik',
-      fullName: 'Kartik Raj',
-      regNo: '22155135023',
-      course: 'CSE(IOT)',
-      college: 'Government Engineering College Vaishali'
-    },
-    {
-      name: 'Shanu',
-      fullName: 'Shanu Kumar',
-      regNo: '22155135026',
-      course: 'CSE(IOT)',
-      college: 'Government Engineering College Vaishali'
-    },
-    {
-      name: 'Krishna',
-      fullName: 'Krishna Murari',
-      regNo: '22155125051',
-      course: 'CSE(IOT)',
-      college: 'Government Engineering College Vaishali'
-    }
+    { name: 'Amarjeet', fullName: 'Amarjeet Kumar', regNo: '22155135005', course: 'CSE(IOT)', college: 'Government Engineering College Vaishali', portfolio: 'https://vercel.com/amarjeet0110s-projects/amarjeet0110' },
+    { name: 'Kartik',   fullName: 'Kartik Raj',     regNo: '22155135023', course: 'CSE(IOT)', college: 'Government Engineering College Vaishali' },
+    { name: 'Shanu',    fullName: 'Shanu Kumar',    regNo: '22155135026', course: 'CSE(IOT)', college: 'Government Engineering College Vaishali' },
+    { name: 'Krishna',  fullName: 'Krishna Murari', regNo: '22155125051', course: 'CSE(IOT)', college: 'Government Engineering College Vaishali' },
   ];
 
-  const COLORS = ['#8b5cf6', '#ec4899', '#10b981', '#3b82f6', '#f59e0b', '#06b6d4'];
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
-  const processCSV = (fileContent) => {
-    return new Promise((resolve) => {
-      Papa.parse(fileContent, {
-        header: true,
-        dynamicTyping: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          resolve({
-            data: results.data,
-            headers: Object.keys(results.data[0] || {})
-          });
-        }
-      });
-    });
-  };
-
-  const processExcel = (arrayBuffer) => {
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-    return {
-      data: jsonData,
-      headers: Object.keys(jsonData[0] || {})
-    };
-  };
-
-  const processPDF = async (arrayBuffer) => {
-    try {
-      const result = await mammoth.extractRawText({ arrayBuffer });
-      const text = result.value;
-      const lines = text.split('\n').filter(line => line.trim());
-      
-      if (lines.length < 2) {
-        throw new Error('PDF does not contain enough data');
-      }
-
-      const headers = lines[0].split(/\s{2,}|\t/).map(h => h.trim());
-      const data = lines.slice(1).map(line => {
-        const values = line.split(/\s{2,}|\t/).map(v => v.trim());
-        const obj = {};
-        headers.forEach((h, i) => {
-          obj[h] = isNaN(values[i]) ? values[i] : parseFloat(values[i]);
-        });
-        return obj;
-      });
-
-      return { data, headers };
-    } catch (error) {
-      return {
-        data: [{ Info: 'PDF text extracted', Content: 'Data parsing attempted' }],
-        headers: ['Info', 'Content']
-      };
-    }
-  };
-
-  const generateInsights = (data, headers) => {
-    const insights = [];
-    const numericCols = headers.filter(h => 
-      data.some(row => typeof row[h] === 'number')
-    );
-
-    if (data.length > 0) {
-      insights.push({
-        type: 'info',
-        title: 'Dataset Size',
-        description: `Total ${data.length} rows with ${headers.length} columns`
-      });
-    }
-
-    numericCols.forEach(col => {
-      const values = data.map(row => row[col]).filter(v => typeof v === 'number');
-      if (values.length > 0) {
-        const sum = values.reduce((a, b) => a + b, 0);
-        const avg = sum / values.length;
-        const max = Math.max(...values);
-        const min = Math.min(...values);
-        
-        insights.push({
-          type: 'success',
-          title: `${col} Statistics`,
-          description: `Avg: ${avg.toFixed(2)} | Max: ${max} | Min: ${min}`
-        });
-      }
-    });
-
-    const categoricalCols = headers.filter(h => !numericCols.includes(h));
-    categoricalCols.slice(0, 2).forEach(col => {
-      const uniqueValues = [...new Set(data.map(row => row[col]))].length;
-      insights.push({
-        type: 'info',
-        title: `${col} Categories`,
-        description: `${uniqueValues} unique values found`
-      });
-    });
-
-    return insights;
-  };
-
-  const calculateStats = (data, headers) => {
-    const numericCols = headers.filter(h => 
-      data.some(row => typeof row[h] === 'number')
-    );
-
-    return numericCols.map(col => {
-      const values = data.map(row => row[col]).filter(v => typeof v === 'number');
-      const sum = values.reduce((a, b) => a + b, 0);
-      const avg = sum / values.length;
-      const max = Math.max(...values);
-      const min = Math.min(...values);
-
-      return {
-        name: col,
-        average: avg.toFixed(2),
-        total: sum.toFixed(2),
-        max,
-        min,
-        count: values.length
-      };
-    });
-  };
-
-  const handleFileUpload = async (e) => {
-    const uploadedFile = e.target.files[0];
-    if (!uploadedFile) return;
-
+  // ── File Processing ────────────────────────────────────────────────────────
+  const processFile = async (uploadedFile) => {
     setFile(uploadedFile);
     setLoading(true);
     setActiveTab('overview');
-
+    setReport('');
+    setChatMessages([]);
     try {
       let result;
-      const fileName = uploadedFile.name.toLowerCase();
-
-      if (fileName.endsWith('.csv')) {
+      const n = uploadedFile.name.toLowerCase();
+      if (n.endsWith('.csv')) {
         const text = await uploadedFile.text();
-        result = await processCSV(text);
-      } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-        const arrayBuffer = await uploadedFile.arrayBuffer();
-        result = processExcel(arrayBuffer);
-      } else if (fileName.endsWith('.pdf')) {
-        const arrayBuffer = await uploadedFile.arrayBuffer();
-        result = await processPDF(arrayBuffer);
-      } else {
-        alert('Please upload CSV, Excel (.xlsx, .xls), or PDF file');
-        setLoading(false);
-        return;
-      }
+        result = await new Promise(res => Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true, complete: r => res({ data: r.data, headers: Object.keys(r.data[0] || {}) }) }));
+      } else if (n.endsWith('.xlsx') || n.endsWith('.xls')) {
+        const buf = await uploadedFile.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(ws);
+        result = { data: json, headers: Object.keys(json[0] || {}) };
+      } else { alert('CSV ya Excel file upload karein'); setLoading(false); return; }
 
-      setData(result.data);
-      setHeaders(result.headers);
-      setInsights(generateInsights(result.data, result.headers));
-      setStats(calculateStats(result.data, result.headers));
-      
-      // Advanced analysis
-      const quality = analyzeDataQuality(result.data, result.headers);
-      setDataQuality(quality);
-      setAlerts(generateAlerts(result.data, result.headers, quality));
-      setAiInsights(generateAIInsights(result.data, result.headers));
-    } catch (error) {
-      console.error('Error processing file:', error);
-      alert('Error processing file. Please check file format.');
-    }
-
+      setData(result.data); setHeaders(result.headers);
+      setInsights(genInsights(result.data, result.headers));
+      setStats(calcStats(result.data, result.headers));
+      setDataQuality(analyzeQuality(result.data, result.headers));
+      setAlerts(genAlerts(result.data, result.headers));
+      setAiInsights(genAIInsights(result.data, result.headers));
+    } catch (e) { console.error(e); alert('File process karne mein error aaya.'); }
     setLoading(false);
   };
 
+  const handleFileInput = (e) => { if (e.target.files[0]) processFile(e.target.files[0]); };
+
+  // Drag & Drop
+  const onDragOver = useCallback((e) => { e.preventDefault(); setIsDragging(true); }, []);
+  const onDragLeave = useCallback(() => setIsDragging(false), []);
+  const onDrop = useCallback((e) => {
+    e.preventDefault(); setIsDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) processFile(f);
+  }, []);
+
+  // ── Analytics Helpers ──────────────────────────────────────────────────────
+  const numCols = (h, d) => h.filter(c => d.some(r => typeof r[c] === 'number'));
+
+  const genInsights = (d, h) => {
+    const nc = numCols(h, d);
+    const ins = [{ type: 'info', title: 'Dataset Size', description: `${d.length} rows, ${h.length} columns` }];
+    nc.forEach(c => {
+      const vals = d.map(r => r[c]).filter(v => typeof v === 'number');
+      if (!vals.length) return;
+      ins.push({ type: 'success', title: `${c} Stats`, description: `Avg: ${_.mean(vals).toFixed(2)} | Max: ${Math.max(...vals)} | Min: ${Math.min(...vals)}` });
+    });
+    h.filter(c => !nc.includes(c)).slice(0, 2).forEach(c => {
+      ins.push({ type: 'info', title: `${c} Categories`, description: `${new Set(d.map(r => r[c])).size} unique values` });
+    });
+    return ins;
+  };
+
+  const calcStats = (d, h) => numCols(h, d).map(c => {
+    const vals = d.map(r => r[c]).filter(v => typeof v === 'number');
+    return { name: c, average: _.mean(vals).toFixed(2), total: _.sum(vals).toFixed(2), max: Math.max(...vals), min: Math.min(...vals), count: vals.length };
+  });
+
+  const analyzeQuality = (d, h) => {
+    const dups = d.length - _.uniqWith(d, _.isEqual).length;
+    const missing = {};
+    h.forEach(c => { const m = d.filter(r => r[c] == null || r[c] === '').length; if (m) missing[c] = m; });
+    return { totalRows: d.length, duplicates: dups, missingValues: missing };
+  };
+
+  const genAlerts = (d, h) => {
+    const al = [];
+    const q = analyzeQuality(d, h);
+    if (q.duplicates > 0) al.push({ type: 'warning', message: `⚠️ ${q.duplicates} duplicate records milein` });
+    const sc = h.find(c => c.toLowerCase().includes('sales') || c.toLowerCase().includes('revenue'));
+    if (sc) {
+      const vals = d.map(r => r[sc]).filter(v => typeof v === 'number');
+      const avg = _.mean(vals);
+      const low = vals.filter(v => v < avg * 0.5).length;
+      if (low > vals.length * 0.3) al.push({ type: 'danger', message: `🚨 ${low} records mein sales average se 50% kum hai` });
+    }
+    return al;
+  };
+
+  const genAIInsights = (d, h) => {
+    const ins = [];
+    const sc = h.find(c => c.toLowerCase().includes('sales') || c.toLowerCase().includes('revenue'));
+    const pc = h.find(c => c.toLowerCase().includes('profit'));
+    const namec = h.find(c => c.toLowerCase().includes('product') || c.toLowerCase().includes('item') || c.toLowerCase().includes('name'));
+    if (sc && namec) {
+      const grouped = _.groupBy(d, namec);
+      const top = _.maxBy(Object.entries(grouped).map(([k, v]) => ({ k, s: _.sum(v.map(r => r[sc]).filter(n => typeof n === 'number')) })), 's');
+      if (top) ins.push({ type: 'success', title: 'Top Performer', description: `${top.k} is the best seller — ${top.s.toLocaleString()} in sales`, icon: Zap });
+    }
+    if (sc && pc) {
+      const ts = _.sum(d.map(r => r[sc]).filter(n => typeof n === 'number'));
+      const tp = _.sum(d.map(r => r[pc]).filter(n => typeof n === 'number'));
+      const m = ts > 0 ? ((tp / ts) * 100).toFixed(1) : 0;
+      ins.push({ type: m > 15 ? 'success' : 'warning', title: 'Profit Margin', description: `Overall margin: ${m}% — ${m < 15 ? 'Consider optimizing costs' : 'Healthy margin!'}`, icon: Activity });
+    }
+    return ins;
+  };
+
+  // ── Chart Data ─────────────────────────────────────────────────────────────
   const getChartData = () => {
-    if (!data || data.length === 0) return [];
-    
-    // Find category/product column
-    const categoryCol = headers.find(h => 
-      h.toLowerCase().includes('product') || 
-      h.toLowerCase().includes('item') ||
-      h.toLowerCase().includes('category') ||
-      h.toLowerCase().includes('name')
-    );
-
-    const salesCol = headers.find(h => 
-      h.toLowerCase().includes('sales') || 
-      h.toLowerCase().includes('revenue') ||
-      h.toLowerCase().includes('amount')
-    );
-
-    const profitCol = headers.find(h => h.toLowerCase().includes('profit'));
-    
-    if (!categoryCol) return [];
-
-    // Group by category
-    const grouped = _.groupBy(data, categoryCol);
-    
-    return Object.entries(grouped).map(([category, rows]) => {
-      const item = { 
-        name: String(category).substring(0, 20)
-      };
-      
-      if (salesCol) {
-        item.Sales = _.sum(rows.map(r => r[salesCol]).filter(v => typeof v === 'number'));
-      }
-      
-      if (profitCol) {
-        item.Profit = _.sum(rows.map(r => r[profitCol]).filter(v => typeof v === 'number'));
-      }
-      
-      // Add other numeric columns
-      headers.filter(h => 
-        h !== categoryCol && 
-        h !== salesCol && 
-        h !== profitCol &&
-        rows.some(row => typeof row[h] === 'number')
-      ).forEach(col => {
-        item[col] = _.sum(rows.map(r => r[col]).filter(v => typeof v === 'number'));
-      });
-      
-      return item;
-    }).sort((a, b) => (b.Sales || 0) - (a.Sales || 0)).slice(0, 20);
+    if (!data) return [];
+    const catCol = headers.find(c => ['product','item','category','name'].some(k => c.toLowerCase().includes(k)));
+    const salCol = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
+    const proCol = headers.find(c => c.toLowerCase().includes('profit'));
+    if (!catCol) return [];
+    return Object.entries(_.groupBy(data, catCol)).map(([name, rows]) => {
+      const obj = { name: String(name).slice(0, 18) };
+      if (salCol) obj.Sales = _.sum(rows.map(r => r[salCol]).filter(n => typeof n === 'number'));
+      if (proCol) obj.Profit = _.sum(rows.map(r => r[proCol]).filter(n => typeof n === 'number'));
+      return obj;
+    }).sort((a, b) => (b.Sales || 0) - (a.Sales || 0)).slice(0, 15);
   };
 
   const getTimeSeriesData = () => {
-    if (!data || data.length === 0) return [];
-    
-    // Find date column
-    const dateCol = headers.find(h => 
-      h.toLowerCase().includes('date') || 
-      h.toLowerCase().includes('time') ||
-      h.toLowerCase().includes('month') ||
-      h.toLowerCase().includes('year')
-    );
-
-    const salesCol = headers.find(h => 
-      h.toLowerCase().includes('sales') || 
-      h.toLowerCase().includes('revenue') ||
-      h.toLowerCase().includes('amount')
-    );
-
-    if (!dateCol || !salesCol) return [];
-
-    // Group by date/time
-    const grouped = _.groupBy(data, dateCol);
-    
-    return Object.entries(grouped)
-      .map(([date, rows]) => ({
-        date: String(date),
-        Sales: _.sum(rows.map(r => r[salesCol]).filter(v => typeof v === 'number')),
-        Orders: rows.length
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(0, 30);
-  };
-
-  const getRegionData = () => {
-    if (!data || data.length === 0) return [];
-    
-    const regionCol = headers.find(h => 
-      h.toLowerCase().includes('region') || 
-      h.toLowerCase().includes('state') ||
-      h.toLowerCase().includes('city') ||
-      h.toLowerCase().includes('zone') ||
-      h.toLowerCase().includes('area')
-    );
-
-    const salesCol = headers.find(h => 
-      h.toLowerCase().includes('sales') || 
-      h.toLowerCase().includes('revenue') ||
-      h.toLowerCase().includes('amount')
-    );
-
-    if (!regionCol || !salesCol) return [];
-
-    const grouped = _.groupBy(data, regionCol);
-    
-    return Object.entries(grouped)
-      .map(([region, rows]) => ({
-        region: String(region),
-        sales: _.sum(rows.map(r => r[salesCol]).filter(v => typeof v === 'number')),
-        orders: rows.length
-      }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 10);
+    if (!data) return [];
+    const dc = headers.find(c => ['date','month','year','time'].some(k => c.toLowerCase().includes(k)));
+    const sc = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
+    if (!dc || !sc) return [];
+    return Object.entries(_.groupBy(data, dc)).map(([date, rows]) => ({
+      date: String(date),
+      Sales: _.sum(rows.map(r => r[sc]).filter(n => typeof n === 'number'))
+    })).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 30);
   };
 
   const getPieData = () => {
-    if (!data || headers.length === 0) return [];
-    
-    const categoricalCol = headers.find(h => 
-      data.every(row => typeof row[h] === 'string')
-    );
-
-    if (!categoricalCol) return [];
-
+    if (!data) return [];
+    const cc = headers.find(c => data.every(r => typeof r[c] === 'string'));
+    if (!cc) return [];
     const counts = {};
-    data.forEach(row => {
-      const val = row[categoricalCol];
-      counts[val] = (counts[val] || 0) + 1;
-    });
-
-    return Object.entries(counts).slice(0, 6).map(([name, value]) => ({
-      name,
-      value
-    }));
+    data.forEach(r => { counts[r[cc]] = (counts[r[cc]] || 0) + 1; });
+    return Object.entries(counts).slice(0, 6).map(([name, value]) => ({ name, value }));
   };
 
+  // ── Correlation Matrix ─────────────────────────────────────────────────────
+  const getCorrMatrix = () => {
+    if (!data) return { cols: [], matrix: [] };
+    const nc = headers.filter(c => data.some(r => typeof r[c] === 'number')).slice(0, 6);
+    const matrix = nc.map(a => nc.map(b => {
+      const va = data.map(r => r[a]).filter(v => typeof v === 'number');
+      const vb = data.map(r => r[b]).filter(v => typeof v === 'number');
+      const n = Math.min(va.length, vb.length);
+      return parseFloat(pearsonCorr(va.slice(0, n), vb.slice(0, n)).toFixed(2));
+    }));
+    return { cols: nc, matrix };
+  };
+
+  // ── Forecast Data ──────────────────────────────────────────────────────────
+  const getForecastData = () => {
+    const ts = getTimeSeriesData();
+    if (ts.length < 3) return { chartData: [], slope: 0 };
+    const vals = ts.map(d => d.Sales);
+    const reg = linearRegression(vals);
+    const chartData = ts.map((d, i) => ({ ...d, Forecast: null, Trend: parseFloat(reg.predict(i).toFixed(2)) }));
+    // Future 5 periods
+    for (let i = 1; i <= 5; i++) {
+      chartData.push({ date: `F+${i}`, Sales: null, Forecast: parseFloat(reg.predict(ts.length - 1 + i).toFixed(2)), Trend: null });
+    }
+    return { chartData, slope: reg.slope };
+  };
+
+  // ── KPIs ───────────────────────────────────────────────────────────────────
   const getKPIs = () => {
     if (!data || !stats) return [];
-    
-    const advancedKPIs = generateAdvancedKPIs(data, headers);
-    if (advancedKPIs.length > 0) return advancedKPIs;
-    
-    // Fallback to basic KPIs
-    const kpis = [
-      {
-        title: 'Total Records',
-        value: data.length.toLocaleString(),
-        icon: FileText,
-        color: 'from-blue-500 to-blue-600',
-        bgColor: 'bg-blue-500/20',
-        borderColor: 'border-blue-500/30'
-      },
-      {
-        title: 'Columns',
-        value: headers.length,
-        icon: BarChart3,
-        color: 'from-purple-500 to-purple-600',
-        bgColor: 'bg-purple-500/20',
-        borderColor: 'border-purple-500/30'
-      }
-    ];
-
-    if (stats.length > 0) {
-      const firstStat = stats[0];
-      kpis.push({
-        title: `Avg ${firstStat.name}`,
-        value: parseFloat(firstStat.average).toLocaleString(),
-        icon: TrendingUp,
-        color: 'from-green-500 to-green-600',
-        bgColor: 'bg-green-500/20',
-        borderColor: 'border-green-500/30'
-      });
-
-      kpis.push({
-        title: `Max ${firstStat.name}`,
-        value: firstStat.max.toLocaleString(),
-        icon: TrendingUp,
-        color: 'from-pink-500 to-pink-600',
-        bgColor: 'bg-pink-500/20',
-        borderColor: 'border-pink-500/30'
-      });
+    const kpis = [{ title: 'Total Records', value: data.length.toLocaleString(), icon: FileText, color: 'from-blue-500 to-blue-600', borderColor: 'border-blue-500/30' }];
+    const sc = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
+    if (sc) {
+      const v = data.map(r => r[sc]).filter(n => typeof n === 'number');
+      kpis.push({ title: 'Total Sales', value: _.sum(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
+      kpis.push({ title: 'Avg Order', value: _.mean(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
     }
-
+    const pc = headers.find(c => c.toLowerCase().includes('profit'));
+    if (pc) {
+      const v = data.map(r => r[pc]).filter(n => typeof n === 'number');
+      const tot = _.sum(v);
+      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: Math.abs(tot).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
+    }
+    const namc = headers.find(c => ['product','item','name'].some(k => c.toLowerCase().includes(k)));
+    if (namc) kpis.push({ title: 'Total Products', value: new Set(data.map(r => r[namc])).size, icon: Package, color: 'from-purple-500 to-purple-600', borderColor: 'border-purple-500/30' });
     return kpis;
   };
 
-  const getFilteredData = () => {
+  const getTopBottom = () => {
+    if (!data) return { top: [], bottom: [] };
+    const namec = headers.find(c => ['product','item','name'].some(k => c.toLowerCase().includes(k)));
+    const sc = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
+    if (!namec || !sc) return { top: [], bottom: [] };
+    const arr = Object.entries(_.groupBy(data, namec)).map(([k, v]) => ({ product: k.slice(0, 20), total: _.sum(v.map(r => r[sc]).filter(n => typeof n === 'number')) })).filter(p => p.total > 0);
+    const sorted = _.orderBy(arr, 'total', 'desc');
+    return { top: sorted.slice(0, 5), bottom: sorted.slice(-5).reverse() };
+  };
+
+  const getFiltered = () => {
     if (!data) return [];
-    
-    let filtered = [...data];
-    
-    if (selectedColumn && filterValue) {
-      filtered = filtered.filter(row => {
-        const value = String(row[selectedColumn]).toLowerCase();
-        return value.includes(filterValue.toLowerCase());
-      });
-    }
-    
-    return filtered;
+    if (!selectedColumn || !filterValue) return data;
+    return data.filter(r => String(r[selectedColumn]).toLowerCase().includes(filterValue.toLowerCase()));
   };
 
-  const analyzeDataQuality = (data, headers) => {
-    const quality = {
-      totalRows: data.length,
-      duplicates: 0,
-      missingValues: {},
-      outliers: [],
-      issues: []
-    };
-
-    // Check duplicates
-    const uniqueRows = _.uniqWith(data, _.isEqual);
-    quality.duplicates = data.length - uniqueRows.length;
-    
-    if (quality.duplicates > 0) {
-      quality.issues.push({
-        type: 'warning',
-        message: `${quality.duplicates} duplicate rows found`
-      });
-    }
-
-    // Check missing values
-    headers.forEach(header => {
-      const missing = data.filter(row => 
-        row[header] === null || 
-        row[header] === undefined || 
-        row[header] === '' || 
-        String(row[header]).toLowerCase() === 'na' ||
-        String(row[header]).toLowerCase() === 'n/a'
-      ).length;
-      
-      if (missing > 0) {
-        quality.missingValues[header] = missing;
-        quality.issues.push({
-          type: 'warning',
-          message: `${header}: ${missing} missing values`
-        });
-      }
-    });
-
-    // Check for outliers in numeric columns
-    headers.forEach(header => {
-      const values = data.map(row => row[header]).filter(v => typeof v === 'number');
-      if (values.length > 0) {
-        const mean = _.mean(values);
-        const stdDev = Math.sqrt(_.mean(values.map(v => Math.pow(v - mean, 2))));
-        const outlierThreshold = mean + (3 * stdDev);
-        
-        const outlierCount = values.filter(v => v > outlierThreshold).length;
-        if (outlierCount > 0) {
-          quality.outliers.push({ column: header, count: outlierCount });
-        }
-      }
-    });
-
-    return quality;
+  // ── AI Chat ────────────────────────────────────────────────────────────────
+  const sendChat = async () => {
+    if (!chatInput.trim() || !data) return;
+    const userMsg = { role: 'user', content: chatInput };
+    const newMsgs = [...chatMessages, userMsg];
+    setChatMessages(newMsgs);
+    setChatInput('');
+    setChatLoading(true);
+    try {
+      const summary = JSON.stringify(data.slice(0, 50));
+      const sys = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${summary}\nTotal rows: ${data.length}\nAnswer the user's questions clearly and precisely with numbers and insights.`;
+      const reply = await callClaude(newMsgs, sys);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+    } catch (e) {       setChatMessages(prev => [...prev, { role: 'assistant', content: '❌ API error occurred. Please try again.' }]); }
+    setChatLoading(false);
   };
 
-  const detectProfitLoss = (headers) => {
-    const profitCols = headers.filter(h => 
-      h.toLowerCase().includes('profit') || 
-      h.toLowerCase().includes('loss') ||
-      h.toLowerCase().includes('revenue') ||
-      h.toLowerCase().includes('sales')
-    );
-    return profitCols;
+  // ── AI Report ──────────────────────────────────────────────────────────────
+  const generateReport = async () => {
+    if (!data) return;
+    setReportLoading(true); setReport('');
+    try {
+      const s = calcStats(data, headers);
+      const sys = `You are a senior business analyst. Write a complete professional business analysis report.`;
+      const prompt = `Based on the data below, write a complete professional business analysis report:\n\nDataset Info:\n- Total rows: ${data.length}\n- Columns: ${headers.join(', ')}\n- Statistics: ${JSON.stringify(s)}\n\nReport format:\n## 📊 Executive Summary\n## 🔍 Key Findings\n## 📈 Trend Analysis\n## ⚠️ Areas of Concern\n## 💡 Recommendations\n## ✅ Conclusion\n\nInclude specific numbers and insights in each section. Keep it professional and concise.`;
+      const rep = await callClaude([{ role: 'user', content: prompt }], sys);
+      setReport(rep);
+    } catch (e) { setReport('❌ Error generating report. Please try again.'); }
+    setReportLoading(false);
   };
 
-  const generateAdvancedKPIs = (data, headers) => {
-    const kpis = [];
-    
-    // Sales related
-    const salesCol = headers.find(h => 
-      h.toLowerCase().includes('sales') || 
-      h.toLowerCase().includes('revenue') ||
-      h.toLowerCase().includes('amount')
-    );
-    
-    if (salesCol) {
-      const salesValues = data.map(row => row[salesCol]).filter(v => typeof v === 'number');
-      const totalSales = _.sum(salesValues);
-      const avgSales = _.mean(salesValues);
-      
-      kpis.push({
-        title: 'Total Sales',
-        value: totalSales.toLocaleString(undefined, { maximumFractionDigits: 0 }),
-        change: '+12.5%',
-        icon: DollarSign,
-        color: 'from-green-500 to-green-600',
-        bgColor: 'bg-green-500/20',
-        borderColor: 'border-green-500/30'
-      });
-      
-      kpis.push({
-        title: 'Avg Order Value',
-        value: avgSales.toLocaleString(undefined, { maximumFractionDigits: 0 }),
-        icon: ShoppingCart,
-        color: 'from-blue-500 to-blue-600',
-        bgColor: 'bg-blue-500/20',
-        borderColor: 'border-blue-500/30'
-      });
-    }
-
-    // Profit/Loss
-    const profitCol = headers.find(h => h.toLowerCase().includes('profit'));
-    if (profitCol) {
-      const profitValues = data.map(row => row[profitCol]).filter(v => typeof v === 'number');
-      const totalProfit = _.sum(profitValues);
-      const isProfit = totalProfit >= 0;
-      
-      kpis.push({
-        title: isProfit ? 'Total Profit' : 'Total Loss',
-        value: Math.abs(totalProfit).toLocaleString(undefined, { maximumFractionDigits: 0 }),
-        icon: TrendingUp,
-        color: isProfit ? 'from-green-500 to-green-600' : 'from-red-500 to-red-600',
-        bgColor: isProfit ? 'bg-green-500/20' : 'bg-red-500/20',
-        borderColor: isProfit ? 'border-green-500/30' : 'border-red-500/30'
-      });
-    }
-
-    // Product count
-    const productCol = headers.find(h => 
-      h.toLowerCase().includes('product') || 
-      h.toLowerCase().includes('item') ||
-      h.toLowerCase().includes('name')
-    );
-    
-    if (productCol) {
-      const uniqueProducts = new Set(data.map(row => row[productCol])).size;
-      kpis.push({
-        title: 'Total Products',
-        value: uniqueProducts,
-        icon: Package,
-        color: 'from-purple-500 to-purple-600',
-        bgColor: 'bg-purple-500/20',
-        borderColor: 'border-purple-500/30'
-      });
-    }
-
-    return kpis;
+  const downloadReport = () => {
+    if (!report) return;
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'analysis_report.txt'; a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const generateAIInsights = (data, headers) => {
-    const insights = [];
-    
-    // Sales trend analysis
-    const salesCol = headers.find(h => 
-      h.toLowerCase().includes('sales') || 
-      h.toLowerCase().includes('revenue')
-    );
-    
-    if (salesCol && data.length > 1) {
-      const salesValues = data.map(row => row[salesCol]).filter(v => typeof v === 'number');
-      const recentSales = salesValues.slice(-5);
-      const olderSales = salesValues.slice(0, 5);
-      
-      if (recentSales.length > 0 && olderSales.length > 0) {
-        const recentAvg = _.mean(recentSales);
-        const olderAvg = _.mean(olderSales);
-        const change = ((recentAvg - olderAvg) / olderAvg) * 100;
-        
-        if (Math.abs(change) > 5) {
-          insights.push({
-            type: change > 0 ? 'success' : 'warning',
-            title: 'Sales Trend Alert',
-            description: `Recent sales ${change > 0 ? 'increased' : 'decreased'} by ${Math.abs(change).toFixed(1)}% compared to earlier period`,
-            icon: change > 0 ? TrendingUp : AlertTriangle
-          });
-        }
-      }
-    }
-
-    // Top performers
-    const productCol = headers.find(h => 
-      h.toLowerCase().includes('product') || 
-      h.toLowerCase().includes('item')
-    );
-    
-    if (productCol && salesCol) {
-      const grouped = _.groupBy(data, productCol);
-      const productSales = Object.entries(grouped).map(([product, rows]) => ({
-        product,
-        total: _.sum(rows.map(r => r[salesCol]).filter(v => typeof v === 'number'))
-      }));
-      
-      const topProduct = _.maxBy(productSales, 'total');
-      if (topProduct) {
-        insights.push({
-          type: 'success',
-          title: 'Top Performer',
-          description: `${topProduct.product} is the best selling product with ${topProduct.total.toLocaleString()} in sales`,
-          icon: Zap
-        });
-      }
-    }
-
-    // Profit margin analysis
-    const profitCol = headers.find(h => h.toLowerCase().includes('profit'));
-    if (profitCol && salesCol) {
-      const totalSales = _.sum(data.map(r => r[salesCol]).filter(v => typeof v === 'number'));
-      const totalProfit = _.sum(data.map(r => r[profitCol]).filter(v => typeof v === 'number'));
-      const margin = (totalProfit / totalSales) * 100;
-      
-      insights.push({
-        type: margin > 20 ? 'success' : margin > 10 ? 'info' : 'warning',
-        title: 'Profit Margin',
-        description: `Overall profit margin is ${margin.toFixed(1)}%. ${margin < 15 ? 'Consider optimizing costs or pricing' : 'Healthy margin maintained'}`,
-        icon: Activity
-      });
-    }
-
-    return insights;
-  };
-
-  const generateAlerts = (data, headers, quality) => {
-    const alerts = [];
-    
-    // Data quality alerts
-    if (quality.duplicates > 0) {
-      alerts.push({
-        type: 'warning',
-        message: `⚠️ ${quality.duplicates} duplicate records detected. Clean data for accurate analysis.`
-      });
-    }
-
-    // Missing value alerts
-    Object.entries(quality.missingValues).forEach(([col, count]) => {
-      if (count > data.length * 0.1) {
-        alerts.push({
-          type: 'warning',
-          message: `⚠️ ${col} has ${count} missing values (${((count/data.length)*100).toFixed(1)}%)`
-        });
-      }
-    });
-
-    // Performance alerts
-    const salesCol = headers.find(h => h.toLowerCase().includes('sales'));
-    if (salesCol) {
-      const salesValues = data.map(r => r[salesCol]).filter(v => typeof v === 'number');
-      const avgSales = _.mean(salesValues);
-      const lowPerformers = salesValues.filter(v => v < avgSales * 0.5).length;
-      
-      if (lowPerformers > salesValues.length * 0.3) {
-        alerts.push({
-          type: 'danger',
-          message: `🚨 ${lowPerformers} records show sales below 50% of average. Review pricing or marketing strategy.`
-        });
-      }
-    }
-
-    return alerts;
-  };
-
-  const getTopBottomPerformers = () => {
-    if (!data || headers.length === 0) return { top: [], bottom: [] };
-    
-    const productCol = headers.find(h => 
-      h.toLowerCase().includes('product') || 
-      h.toLowerCase().includes('item') ||
-      h.toLowerCase().includes('name')
-    );
-    
-    const salesCol = headers.find(h => 
-      h.toLowerCase().includes('sales') || 
-      h.toLowerCase().includes('revenue') ||
-      h.toLowerCase().includes('amount')
-    );
-    
-    if (!productCol || !salesCol) return { top: [], bottom: [] };
-    
-    const grouped = _.groupBy(data, productCol);
-    const productSales = Object.entries(grouped).map(([product, rows]) => ({
-      product: String(product).substring(0, 20),
-      total: _.sum(rows.map(r => r[salesCol]).filter(v => typeof v === 'number'))
-    })).filter(p => p.total > 0);
-    
-    const sorted = _.orderBy(productSales, 'total', 'desc');
-    
-    return {
-      top: sorted.slice(0, 5),
-      bottom: sorted.slice(-5).reverse()
-    };
-  };
-
-  const handleReset = () => {
-    setFile(null);
-    setData(null);
-    setHeaders([]);
-    setInsights([]);
-    setStats(null);
-    setActiveTab('overview');
-    setDataQuality(null);
-    setAlerts([]);
-    setAiInsights([]);
-    setSelectedColumn('');
-    setFilterValue('');
-  };
-
-  const handleDeveloperClick = (dev) => {
-    setSelectedDeveloper(dev);
-    setShowDeveloperModal(true);
-  };
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   const chartData = getChartData();
+  const timeData = getTimeSeriesData();
   const pieData = getPieData();
-  const timeSeriesData = getTimeSeriesData();
-  const regionData = getRegionData();
-  const numericHeaders = headers.filter(h => 
-    data && data.some(row => typeof row[h] === 'number')
-  );
+  const { chartData: forecastData, slope } = getForecastData();
+  const { cols: corrCols, matrix: corrMatrix } = getCorrMatrix();
+  const { top, bottom } = getTopBottom();
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'charts', label: 'Charts' },
+    { id: 'forecast', label: '📈 Forecast' },
+    { id: 'correlation', label: '🔥 Heatmap' },
+    { id: 'chat', label: '🤖 AI Chat' },
+    { id: 'report', label: '📄 Report' },
+    { id: 'data', label: 'Data' },
+  ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      {/* Developer Modal */}
-      {showDeveloperModal && selectedDeveloper && (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900"
+      onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+
+      {/* Drag Overlay */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-purple-900/80 backdrop-blur-sm border-4 border-dashed border-purple-400 pointer-events-none">
+          <div className="text-center">
+            <Upload className="w-20 h-20 text-purple-300 mx-auto mb-4 animate-bounce" />
+            <p className="text-3xl font-bold text-white">File Yahan Drop Karein!</p>
+            <p className="text-purple-300 mt-2">CSV ya Excel file</p>
+          </div>
+        </div>
+      )}
+
+      {/* Dev Modal */}
+      {showDev && selDev && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-gradient-to-br from-slate-800 to-purple-900 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-purple-500/30 relative animate-in fade-in zoom-in duration-300">
-            <button
-              onClick={() => setShowDeveloperModal(false)}
-              className="absolute top-4 right-4 p-2 hover:bg-slate-700/50 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-purple-200" />
-            </button>
-            
+          <div className="bg-gradient-to-br from-slate-800 to-purple-900 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-purple-500/30 relative">
+            <button onClick={() => setShowDev(false)} className="absolute top-4 right-4 p-2 hover:bg-slate-700/50 rounded-lg"><X className="w-5 h-5 text-purple-200" /></button>
             <div className="text-center">
               <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <span className="text-3xl font-bold text-white">
-                  {selectedDeveloper.fullName.charAt(0)}
-                </span>
+                <span className="text-3xl font-bold text-white">{selDev.fullName.charAt(0)}</span>
               </div>
-              
-              <h3 className="text-2xl font-bold text-white mb-2">
-                {selectedDeveloper.fullName}
-              </h3>
-              
-              <div className="space-y-2 text-left bg-slate-700/30 rounded-lg p-4 mb-4">
-                <p className="text-purple-200">
-                  <span className="font-semibold text-white">Reg No:</span> {selectedDeveloper.regNo}
-                </p>
-                <p className="text-purple-200">
-                  <span className="font-semibold text-white">Course:</span> {selectedDeveloper.course}
-                </p>
-                <p className="text-purple-200">
-                  <span className="font-semibold text-white">College:</span> {selectedDeveloper.college}
-                </p>
+              <h3 className="text-2xl font-bold text-white mb-4">{selDev.fullName}</h3>
+              <div className="text-left bg-slate-700/30 rounded-lg p-4 space-y-2 mb-4">
+                <p className="text-purple-200"><span className="font-semibold text-white">Reg No:</span> {selDev.regNo}</p>
+                <p className="text-purple-200"><span className="font-semibold text-white">Course:</span> {selDev.course}</p>
+                <p className="text-purple-200"><span className="font-semibold text-white">College:</span> {selDev.college}</p>
               </div>
-              
-              {selectedDeveloper.portfolio && (
-                <a
-                  href={selectedDeveloper.portfolio}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg"
-                >
+              {selDev.portfolio && (
+                <a href={selDev.portfolio} target="_blank" rel="noopener noreferrer"
+                  className="inline-block px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg font-semibold hover:scale-105 transition-transform shadow-lg">
                   View Portfolio
                 </a>
               )}
@@ -789,221 +387,126 @@ const DataAnalysisDashboard = () => {
 
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-800 to-purple-900 border-b border-purple-500/30 shadow-2xl">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg shadow-lg">
-                <Github className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white">
-                  Data Analysis Dashboard
-                </h1>
-                <p className="text-xs sm:text-sm text-purple-200 mt-1">
-                  AI-Powered Analytics with Smart Insights & Data Quality Reports
-                </p>
-              </div>
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg shadow-lg">
+              <Brain className="w-8 h-8 text-white" />
             </div>
-            
-            <div className="flex items-center gap-2">
-              {data && (
-                <button
-                  onClick={handleReset}
-                  className="p-2 sm:p-3 bg-slate-700/50 hover:bg-slate-600/50 text-purple-200 rounded-lg transition-all duration-300 border border-purple-500/30"
-                  title="Go to Home"
-                >
-                  <Home className="w-5 h-5" />
-                </button>
-              )}
-              
-              <label className="cursor-pointer">
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls,.pdf"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                <div className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg shadow-lg transition-all duration-300 transform hover:scale-105">
-                  <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
-                  <span className="text-sm sm:text-base font-semibold">Upload File</span>
-                </div>
-              </label>
+            <div>
+              <h1 className="text-2xl font-bold text-white">AI Data Analysis Dashboard</h1>
+              <p className="text-xs text-purple-300">Data Analysis Dashboard</p>
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {data && <button onClick={() => { setFile(null); setData(null); setHeaders([]); setReport(''); setChatMessages([]); setActiveTab('overview'); }} className="p-3 bg-slate-700/50 hover:bg-slate-600/50 text-purple-200 rounded-lg border border-purple-500/30 transition-all"><Home className="w-5 h-5" /></button>}
+            <label className="cursor-pointer">
+              <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleFileInput} className="hidden" />
+              <div className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg shadow-lg transition-all transform hover:scale-105 font-semibold">
+                <Upload className="w-5 h-5" /><span>Upload File</span>
+              </div>
+            </label>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
+      <div className="max-w-7xl mx-auto px-4 py-6">
+
+        {/* Loading */}
+        {loading && (
+          <div className="flex items-center justify-center py-24">
             <div className="text-center">
               <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-500 mx-auto"></div>
-              <p className="mt-4 text-purple-200 font-medium">Processing your file...</p>
+              <p className="mt-4 text-purple-200 font-medium">File process ho rahi hai...</p>
             </div>
           </div>
-        ) : !data ? (
-          <div className="text-center py-12 sm:py-20">
-            <div className="max-w-md mx-auto">
-              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-8 sm:p-12 border border-purple-500/30">
-                <FileText className="w-16 h-16 sm:w-20 sm:h-20 text-purple-400 mx-auto mb-6" />
-                <h2 className="text-xl sm:text-2xl font-bold text-white mb-4">
-                  Welcome to Professional Data Analysis
-                </h2>
-                <p className="text-sm sm:text-base text-purple-200 mb-8">
-                  Upload your CSV, Excel, or PDF file to get AI-powered insights, data quality reports, profit/loss analysis, and professional visualizations like Power BI & Looker Studio.
-                </p>
-                <div className="grid grid-cols-2 gap-3 mb-6">
-                  <div className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/30">
-                    <Activity className="w-6 h-6 text-green-400 mb-2" />
-                    <p className="text-xs text-purple-200">AI Insights</p>
-                  </div>
-                  <div className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/30">
-                    <AlertTriangle className="w-6 h-6 text-orange-400 mb-2" />
-                    <p className="text-xs text-purple-200">Smart Alerts</p>
-                  </div>
-                  <div className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/30">
-                    <DollarSign className="w-6 h-6 text-blue-400 mb-2" />
-                    <p className="text-xs text-purple-200">Profit Analysis</p>
-                  </div>
-                  <div className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/30">
-                    <Filter className="w-6 h-6 text-pink-400 mb-2" />
-                    <p className="text-xs text-purple-200">Data Quality</p>
-                  </div>
+        )}
+
+        {/* Upload Screen */}
+        {!loading && !data && (
+          <div className="text-center py-12">
+            <div className="max-w-lg mx-auto">
+              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-10 border-2 border-dashed border-purple-500/50 hover:border-purple-400 transition-all cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}>
+                <Upload className="w-20 h-20 text-purple-400 mx-auto mb-6 animate-bounce" />
+                <h2 className="text-2xl font-bold text-white mb-2">Drop Your File Here</h2>
+                <p className="text-purple-300 mb-6">or click to select a file</p>
+                <div className="grid grid-cols-2 gap-3 mb-6 text-left">
+                  {[['🤖','AI Chat — Ask questions about your data'],['📄','Auto Report — Analysis in 1 click'],['📈','Trend Forecast — Future predictions'],['🔥','Correlation Heatmap — Column relationships']].map(([icon, txt]) => (
+                    <div key={txt} className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/20">
+                      <span className="text-lg">{icon}</span>
+                      <p className="text-xs text-purple-200 mt-1">{txt}</p>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex flex-wrap gap-2 justify-center text-xs sm:text-sm">
-                  <span className="px-3 py-1 bg-purple-500/30 text-purple-200 rounded-full border border-purple-400/30">CSV</span>
-                  <span className="px-3 py-1 bg-green-500/30 text-green-200 rounded-full border border-green-400/30">Excel</span>
-                  <span className="px-3 py-1 bg-pink-500/30 text-pink-200 rounded-full border border-pink-400/30">PDF</span>
+                <div className="flex gap-2 justify-center">
+                  <span className="px-3 py-1 bg-purple-500/30 text-purple-200 rounded-full text-sm border border-purple-400/30">CSV</span>
+                  <span className="px-3 py-1 bg-green-500/30 text-green-200 rounded-full text-sm border border-green-400/30">Excel (.xlsx)</span>
                 </div>
               </div>
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* Dashboard */}
+        {!loading && data && (
           <>
-            {/* File Info Card */}
-            <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 mb-6 sm:mb-8 border border-purple-500/30">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            {/* File Bar + Tabs */}
+            <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 mb-6 border border-purple-500/30">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
                 <div className="flex items-center gap-3">
-                  <FileText className="w-8 h-8 sm:w-10 sm:h-10 text-purple-400" />
+                  <FileText className="w-8 h-8 text-purple-400" />
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-white">{file?.name}</h3>
-                    <p className="text-xs sm:text-sm text-purple-200">
-                      {data.length} rows × {headers.length} columns
-                    </p>
+                    <h3 className="font-bold text-white">{file?.name}</h3>
+                    <p className="text-xs text-purple-300">{data.length} rows × {headers.length} columns</p>
                   </div>
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto">
-                  <button
-                    onClick={() => setActiveTab('overview')}
-                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeTab === 'overview'
-                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg'
-                        : 'bg-slate-700/50 text-purple-200 hover:bg-slate-600/50 border border-purple-500/30'
-                    }`}
-                  >
-                    Overview
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {tabs.map(t => (
+                  <button key={t.id} onClick={() => setActiveTab(t.id)}
+                    className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${activeTab === t.id ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' : 'bg-slate-700/50 text-purple-200 hover:bg-slate-600/50 border border-purple-500/30'}`}>
+                    {t.label}
                   </button>
-                  <button
-                    onClick={() => setActiveTab('charts')}
-                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeTab === 'charts'
-                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg'
-                        : 'bg-slate-700/50 text-purple-200 hover:bg-slate-600/50 border border-purple-500/30'
-                    }`}
-                  >
-                    Charts
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('data')}
-                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeTab === 'data'
-                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg'
-                        : 'bg-slate-700/50 text-purple-200 hover:bg-slate-600/50 border border-purple-500/30'
-                    }`}
-                  >
-                    Data
-                  </button>
-                </div>
+                ))}
               </div>
             </div>
 
-            {/* Overview Tab */}
+            {/* ── OVERVIEW ─────────────────────────────────────────────────── */}
             {activeTab === 'overview' && (
               <>
-                {/* KPI Cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
-                  {getKPIs().map((kpi, idx) => {
-                    const Icon = kpi.icon;
+                {/* KPIs */}
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+                  {getKPIs().map((k, i) => {
+                    const Icon = k.icon;
                     return (
-                      <div
-                        key={idx}
-                        className={`bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 border ${kpi.borderColor} hover:scale-105 transition-transform duration-300`}
-                      >
-                        <div className="flex items-center justify-between mb-3">
-                          <div className={`p-2 rounded-lg bg-gradient-to-br ${kpi.color}`}>
-                            <Icon className="w-5 h-5 text-white" />
-                          </div>
-                          {kpi.change && (
-                            <span className="text-xs text-green-400 font-semibold">{kpi.change}</span>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-xs text-purple-200 mb-1">{kpi.title}</p>
-                          <p className="text-xl sm:text-2xl font-bold text-white">{kpi.value}</p>
-                        </div>
+                      <div key={i} className={`bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 border ${k.borderColor} hover:scale-105 transition-transform`}>
+                        <div className={`p-2 rounded-lg bg-gradient-to-br ${k.color} w-fit mb-2`}><Icon className="w-5 h-5 text-white" /></div>
+                        <p className="text-xs text-purple-300">{k.title}</p>
+                        <p className="text-xl font-bold text-white">{k.value}</p>
                       </div>
                     );
                   })}
                 </div>
 
-                {/* Alerts Section */}
+                {/* Alerts */}
                 {alerts.length > 0 && (
-                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 mb-6 border border-orange-500/30">
-                    <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5 text-orange-400" />
-                      Alerts & Recommendations
-                    </h3>
-                    <div className="space-y-2">
-                      {alerts.map((alert, idx) => (
-                        <div key={idx} className={`p-3 rounded-lg ${
-                          alert.type === 'danger' ? 'bg-red-500/10 border border-red-500/30' :
-                          alert.type === 'warning' ? 'bg-orange-500/10 border border-orange-500/30' :
-                          'bg-blue-500/10 border border-blue-500/30'
-                        }`}>
-                          <p className="text-xs text-white">{alert.message}</p>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="bg-gradient-to-br from-slate-800/80 to-orange-900/20 rounded-xl p-4 mb-4 border border-orange-500/30">
+                    <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-orange-400" />Alerts</h3>
+                    {alerts.map((a, i) => <p key={i} className={`text-xs p-2 rounded mb-1 ${a.type === 'danger' ? 'bg-red-500/10 text-red-200' : 'bg-orange-500/10 text-orange-200'}`}>{a.message}</p>)}
                   </div>
                 )}
 
                 {/* AI Insights */}
                 {aiInsights.length > 0 && (
-                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 mb-6 border border-purple-500/30">
-                    <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                      <Zap className="w-5 h-5 text-yellow-400" />
-                      AI-Powered Insights
-                    </h3>
+                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl p-4 mb-4 border border-purple-500/30">
+                    <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-yellow-400" />AI Insights</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {aiInsights.map((insight, idx) => {
-                        const Icon = insight.icon;
+                      {aiInsights.map((ins, i) => {
+                        const Icon = ins.icon;
                         return (
-                          <div key={idx} className={`p-3 rounded-lg ${
-                            insight.type === 'success' ? 'bg-green-500/10 border border-green-500/30' :
-                            insight.type === 'warning' ? 'bg-orange-500/10 border border-orange-500/30' :
-                            'bg-blue-500/10 border border-blue-500/30'
-                          }`}>
-                            <div className="flex items-start gap-2">
-                              <Icon className={`w-4 h-4 mt-0.5 ${
-                                insight.type === 'success' ? 'text-green-400' :
-                                insight.type === 'warning' ? 'text-orange-400' :
-                                'text-blue-400'
-                              }`} />
-                              <div>
-                                <h4 className="text-xs font-bold text-white mb-1">{insight.title}</h4>
-                                <p className="text-xs text-purple-200">{insight.description}</p>
-                              </div>
-                            </div>
+                          <div key={i} className={`p-3 rounded-lg flex gap-2 ${ins.type === 'success' ? 'bg-green-500/10 border border-green-500/30' : 'bg-orange-500/10 border border-orange-500/30'}`}>
+                            <Icon className={`w-4 h-4 mt-0.5 ${ins.type === 'success' ? 'text-green-400' : 'text-orange-400'}`} />
+                            <div><p className="text-xs font-bold text-white">{ins.title}</p><p className="text-xs text-purple-200">{ins.description}</p></div>
                           </div>
                         );
                       })}
@@ -1011,534 +514,371 @@ const DataAnalysisDashboard = () => {
                   </div>
                 )}
 
-                {/* Data Quality Report */}
+                {/* Data Quality */}
                 {dataQuality && (
-                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 mb-6 border border-purple-500/30">
-                    <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                      <Activity className="w-5 h-5 text-purple-400" />
-                      Data Quality Report
-                    </h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      <div className="bg-slate-700/30 p-3 rounded-lg">
-                        <p className="text-xs text-purple-200 mb-1">Total Rows</p>
-                        <p className="text-lg font-bold text-white">{dataQuality.totalRows}</p>
-                      </div>
-                      <div className="bg-slate-700/30 p-3 rounded-lg">
-                        <p className="text-xs text-purple-200 mb-1">Duplicates</p>
-                        <p className={`text-lg font-bold ${dataQuality.duplicates > 0 ? 'text-orange-400' : 'text-green-400'}`}>
-                          {dataQuality.duplicates}
-                        </p>
-                      </div>
-                      <div className="bg-slate-700/30 p-3 rounded-lg">
-                        <p className="text-xs text-purple-200 mb-1">Columns with Missing Data</p>
-                        <p className={`text-lg font-bold ${Object.keys(dataQuality.missingValues).length > 0 ? 'text-orange-400' : 'text-green-400'}`}>
-                          {Object.keys(dataQuality.missingValues).length}
-                        </p>
-                      </div>
+                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl p-4 mb-4 border border-purple-500/30">
+                    <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><Activity className="w-4 h-4 text-purple-400" />Data Quality Report</h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-slate-700/30 p-3 rounded-lg"><p className="text-xs text-purple-300">Total Rows</p><p className="text-lg font-bold text-white">{dataQuality.totalRows}</p></div>
+                      <div className="bg-slate-700/30 p-3 rounded-lg"><p className="text-xs text-purple-300">Duplicates</p><p className={`text-lg font-bold ${dataQuality.duplicates > 0 ? 'text-orange-400' : 'text-green-400'}`}>{dataQuality.duplicates}</p></div>
+                      <div className="bg-slate-700/30 p-3 rounded-lg"><p className="text-xs text-purple-300">Missing Cols</p><p className={`text-lg font-bold ${Object.keys(dataQuality.missingValues).length > 0 ? 'text-orange-400' : 'text-green-400'}`}>{Object.keys(dataQuality.missingValues).length}</p></div>
                     </div>
                   </div>
                 )}
 
-                {/* Top & Bottom Performers */}
-                {(() => {
-                  const performers = getTopBottomPerformers();
-                  return performers.top.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                      <div className="bg-gradient-to-br from-slate-800/80 to-green-900/40 backdrop-blur-xl rounded-xl shadow-xl p-4 border border-green-500/30">
-                        <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                          <TrendingUp className="w-5 h-5 text-green-400" />
-                          Top 5 Performers
-                        </h3>
-                        <div className="space-y-2">
-                          {performers.top.map((item, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-700/30 p-2 rounded-lg">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-green-400">#{idx + 1}</span>
-                                <span className="text-xs text-white">{item.product}</span>
-                              </div>
-                              <span className="text-xs font-bold text-green-400">{item.total.toLocaleString()}</span>
-                            </div>
-                          ))}
+                {/* Top / Bottom */}
+                {top.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="bg-gradient-to-br from-slate-800/80 to-green-900/30 rounded-xl p-4 border border-green-500/30">
+                      <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-400" />Top 5 Performers</h3>
+                      {top.map((p, i) => (
+                        <div key={i} className="flex justify-between items-center bg-slate-700/30 p-2 rounded mb-1">
+                          <div className="flex gap-2 items-center"><span className="text-xs font-bold text-green-400">#{i+1}</span><span className="text-xs text-white">{p.product}</span></div>
+                          <span className="text-xs font-bold text-green-400">{p.total.toLocaleString()}</span>
                         </div>
-                      </div>
-
-                      <div className="bg-gradient-to-br from-slate-800/80 to-red-900/40 backdrop-blur-xl rounded-xl shadow-xl p-4 border border-red-500/30">
-                        <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                          <AlertTriangle className="w-5 h-5 text-red-400" />
-                          Bottom 5 Performers
-                        </h3>
-                        <div className="space-y-2">
-                          {performers.bottom.map((item, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-700/30 p-2 rounded-lg">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-red-400">#{idx + 1}</span>
-                                <span className="text-xs text-white">{item.product}</span>
-                              </div>
-                              <span className="text-xs font-bold text-red-400">{item.total.toLocaleString()}</span>
-                            </div>
-                          ))}
+                      ))}
+                    </div>
+                    <div className="bg-gradient-to-br from-slate-800/80 to-red-900/30 rounded-xl p-4 border border-red-500/30">
+                      <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-red-400" />Bottom 5 Performers</h3>
+                      {bottom.map((p, i) => (
+                        <div key={i} className="flex justify-between items-center bg-slate-700/30 p-2 rounded mb-1">
+                          <div className="flex gap-2 items-center"><span className="text-xs font-bold text-red-400">#{i+1}</span><span className="text-xs text-white">{p.product}</span></div>
+                          <span className="text-xs font-bold text-red-400">{p.total.toLocaleString()}</span>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Filter Panel */}
-                <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 mb-6 border border-purple-500/30">
-                  <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-purple-400" />
-                    Data Filters
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-purple-200 mb-1">Column</label>
-                      <select
-                        value={selectedColumn}
-                        onChange={(e) => setSelectedColumn(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      >
-                        <option value="">All Columns</option>
-                        {headers.map((header, idx) => (
-                          <option key={idx} value={header}>{header}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-purple-200 mb-1">Search Value</label>
-                      <input
-                        type="text"
-                        value={filterValue}
-                        onChange={(e) => setFilterValue(e.target.value)}
-                        placeholder="Type to filter..."
-                        className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm placeholder-purple-300/50 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      />
+                      ))}
                     </div>
                   </div>
-                  {filterValue && selectedColumn && (
-                    <div className="mt-3 text-xs text-purple-200">
-                      Showing {getFilteredData().length} of {data.length} records
-                    </div>
-                  )}
-                </div>
+                )}
 
-                {/* Insights */}
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-4 mb-6 sm:mb-8">
-                  {insights.map((insight, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 border border-purple-500/30 hover:border-purple-400/50 transform hover:scale-105 transition-all duration-300"
-                    >
-                      <div className="flex items-start gap-3">
-                        {insight.type === 'success' ? (
-                          <div className="p-2 bg-green-500/20 rounded-lg">
-                            <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0" />
-                          </div>
-                        ) : (
-                          <div className="p-2 bg-purple-500/20 rounded-lg">
-                            <AlertCircle className="w-5 h-5 text-purple-400 flex-shrink-0" />
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-sm font-bold text-white mb-1">
-                            {insight.title}
-                          </h4>
-                          <p className="text-xs text-purple-200 break-words leading-relaxed">
-                            {insight.description}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Statistics Table */}
+                {/* Stats Table */}
                 {stats && stats.length > 0 && (
-                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 mb-6 sm:mb-8 border border-purple-500/30">
-                    <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                      <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400" />
-                      Statistical Summary
-                    </h3>
-                    <div className="overflow-x-auto -mx-4 sm:mx-0">
-                      <div className="inline-block min-w-full align-middle">
-                        <table className="min-w-full divide-y divide-purple-500/30">
-                          <thead className="bg-slate-700/50">
-                            <tr>
-                              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider">
-                                Column
-                              </th>
-                              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider">
-                                Average
-                              </th>
-                              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider">
-                                Total
-                              </th>
-                              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider">
-                                Max
-                              </th>
-                              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider">
-                                Min
-                              </th>
+                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl shadow-2xl p-4 border border-purple-500/30">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-purple-400" />Statistical Summary</h3>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-purple-500/30">
+                        <thead className="bg-slate-700/50">
+                          <tr>{['Column','Average','Total','Max','Min'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-purple-300 uppercase">{h}</th>)}</tr>
+                        </thead>
+                        <tbody className="divide-y divide-purple-500/20">
+                          {stats.map((s, i) => (
+                            <tr key={i} className="hover:bg-slate-700/30">
+                              <td className="px-4 py-3 text-sm font-medium text-white">{s.name}</td>
+                              <td className="px-4 py-3 text-sm text-purple-200">{s.average}</td>
+                              <td className="px-4 py-3 text-sm font-semibold text-purple-200">{s.total}</td>
+                              <td className="px-4 py-3 text-sm text-purple-200">{s.max}</td>
+                              <td className="px-4 py-3 text-sm text-purple-200">{s.min}</td>
                             </tr>
-                          </thead>
-                          <tbody className="divide-y divide-purple-500/20">
-                            {stats.map((stat, idx) => {
-                              const isProfit = stat.name.toLowerCase().includes('profit');
-                              const isLoss = stat.name.toLowerCase().includes('loss');
-                              const isSales = stat.name.toLowerCase().includes('sales') || stat.name.toLowerCase().includes('revenue');
-                              
-                              return (
-                                <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
-                                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-medium text-white">
-                                    {stat.name}
-                                    {isProfit && <span className="ml-2 text-green-400">📈</span>}
-                                    {isLoss && <span className="ml-2 text-red-400">📉</span>}
-                                    {isSales && <span className="ml-2 text-blue-400">💰</span>}
-                                  </td>
-                                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-purple-200">
-                                    {stat.average}
-                                  </td>
-                                  <td className={`px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm font-semibold ${
-                                    isProfit ? 'text-green-400' : isLoss ? 'text-red-400' : 'text-purple-200'
-                                  }`}>
-                                    {stat.total}
-                                  </td>
-                                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-purple-200">
-                                    {stat.max}
-                                  </td>
-                                  <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-purple-200">
-                                    {stat.min}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
               </>
             )}
 
-            {/* Charts Tab */}
-            {activeTab === 'charts' && chartData.length > 0 && (
-              <div className="space-y-4 sm:space-y-6">
-                {/* Time Series Trend */}
-                {timeSeriesData.length > 0 && (
-                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 sm:p-6 border border-purple-500/30">
-                    <h3 className="text-base sm:text-lg font-bold text-white mb-4 flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5 text-green-400" />
-                      Sales Trend Over Time
-                      <span className="ml-auto text-xs text-purple-300">📌 Insight: Identify peak periods</span>
-                    </h3>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <AreaChart data={timeSeriesData}>
-                        <defs>
-                          <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
-                        <XAxis 
-                          dataKey="date" 
-                          tick={{ fontSize: 10, fill: '#c4b5fd' }}
-                          angle={-45}
-                          textAnchor="end"
-                          height={80}
-                        />
-                        <YAxis tick={{ fontSize: 11, fill: '#c4b5fd' }} />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: '#1e293b', 
-                            border: '1px solid #10b981', 
-                            borderRadius: '8px', 
-                            fontSize: '12px' 
-                          }} 
-                        />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Area
-                          type="monotone"
-                          dataKey="Sales"
-                          stroke="#10b981"
-                          fillOpacity={1}
-                          fill="url(#salesGradient)"
-                        />
+            {/* ── CHARTS ────────────────────────────────────────────────────── */}
+            {activeTab === 'charts' && (
+              <div className="space-y-4">
+                {timeData.length > 0 && (
+                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl p-4 border border-purple-500/30">
+                    <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-green-400" />Sales Trend Over Time</h3>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <AreaChart data={timeData}>
+                        <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/></linearGradient></defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3}/>
+                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#c4b5fd' }} angle={-45} textAnchor="end" height={70}/>
+                        <YAxis tick={{ fontSize: 10, fill: '#c4b5fd' }}/>
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #10b981', borderRadius: '8px', fontSize: '12px' }}/>
+                        <Area type="monotone" dataKey="Sales" stroke="#10b981" fillOpacity={1} fill="url(#sg)"/>
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
                 )}
 
-                {/* Product Performance - Top & Bottom */}
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                  {/* Top Products */}
-                  <div className="bg-gradient-to-br from-slate-800/80 to-green-900/40 backdrop-blur-xl rounded-xl shadow-xl p-4 sm:p-6 border border-green-500/30">
-                    <h3 className="text-base sm:text-lg font-bold text-white mb-4 flex items-center gap-2">
-                      <BarChart3 className="w-5 h-5 text-green-400" />
-                      Product Performance (Top 10)
-                      <span className="ml-auto text-xs text-green-300">📌 Best Sellers</span>
-                    </h3>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <BarChart data={chartData.slice(0, 10)} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
-                        <XAxis type="number" tick={{ fontSize: 11, fill: '#c4b5fd' }} />
-                        <YAxis 
-                          type="category" 
-                          dataKey="name" 
-                          tick={{ fontSize: 10, fill: '#c4b5fd' }}
-                          width={100}
-                        />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: '#1e293b', 
-                            border: '1px solid #10b981', 
-                            borderRadius: '8px', 
-                            fontSize: '12px' 
-                          }} 
-                        />
-                        <Bar dataKey="Sales" fill="#10b981" radius={[0, 8, 8, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  {/* Region-wise Sales */}
-                  {regionData.length > 0 && (
-                    <div className="bg-gradient-to-br from-slate-800/80 to-blue-900/40 backdrop-blur-xl rounded-xl shadow-xl p-4 sm:p-6 border border-blue-500/30">
-                      <h3 className="text-base sm:text-lg font-bold text-white mb-4 flex items-center gap-2">
-                        <BarChart3 className="w-5 h-5 text-blue-400" />
-                        Region-wise Performance
-                        <span className="ml-auto text-xs text-blue-300">📌 Geographic Analysis</span>
-                      </h3>
-                      <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={regionData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
-                          <XAxis 
-                            dataKey="region" 
-                            tick={{ fontSize: 10, fill: '#c4b5fd' }}
-                            angle={-45}
-                            textAnchor="end"
-                            height={80}
-                          />
-                          <YAxis tick={{ fontSize: 11, fill: '#c4b5fd' }} />
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: '#1e293b', 
-                              border: '1px solid #3b82f6', 
-                              borderRadius: '8px', 
-                              fontSize: '12px' 
-                            }} 
-                          />
-                          <Bar dataKey="sales" fill="#3b82f6" radius={[8, 8, 0, 0]} />
+                  {chartData.length > 0 && (
+                    <div className="bg-gradient-to-br from-slate-800/80 to-green-900/20 rounded-xl p-4 border border-green-500/30">
+                      <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-green-400" />Product Performance</h3>
+                      <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={chartData.slice(0, 10)} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3}/>
+                          <XAxis type="number" tick={{ fontSize: 10, fill: '#c4b5fd' }}/>
+                          <YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: '#c4b5fd' }} width={95}/>
+                          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #10b981', borderRadius: '8px', fontSize: '12px' }}/>
+                          <Bar dataKey="Sales" fill="#10b981" radius={[0,8,8,0]}/>
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
                   )}
-                </div>
-
-                {/* Profit vs Sales Comparison */}
-                {detectProfitLoss(headers).length > 0 && (
-                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 sm:p-6 border border-purple-500/30">
-                    <h3 className="text-base sm:text-lg font-bold text-white mb-4 flex items-center gap-2">
-                      <DollarSign className="w-5 h-5 text-yellow-400" />
-                      Profit vs Sales Analysis
-                      <span className="ml-auto text-xs text-yellow-300">📌 Profitability Check</span>
-                    </h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={chartData.slice(0, 15)}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
-                        <XAxis 
-                          dataKey="name" 
-                          tick={{ fontSize: 10, fill: '#c4b5fd' }}
-                          angle={-45}
-                          textAnchor="end"
-                          height={80}
-                        />
-                        <YAxis tick={{ fontSize: 11, fill: '#c4b5fd' }} />
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px', fontSize: '12px' }} />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Bar dataKey="Sales" fill="#3b82f6" />
-                        <Bar dataKey="Profit" fill="#10b981" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-
-                {/* Category Contribution */}
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {pieData.length > 0 && (
-                    <div className="bg-gradient-to-br from-slate-800/80 to-pink-900/40 backdrop-blur-xl rounded-xl shadow-xl p-4 sm:p-6 border border-pink-500/30">
-                      <h3 className="text-base sm:text-lg font-bold text-white mb-4 flex items-center gap-2">
-                        <Activity className="w-5 h-5 text-pink-400" />
-                        Category Contribution (%)
-                        <span className="ml-auto text-xs text-pink-300">📌 Market Share</span>
-                      </h3>
-                      <ResponsiveContainer width="100%" height={280}>
+                    <div className="bg-gradient-to-br from-slate-800/80 to-pink-900/20 rounded-xl p-4 border border-pink-500/30">
+                      <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-pink-400" />Category Distribution</h3>
+                      <ResponsiveContainer width="100%" height={260}>
                         <PieChart>
-                          <Pie
-                            data={pieData}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                            outerRadius={90}
-                            fill="#8884d8"
-                            dataKey="value"
-                          >
-                            {pieData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
+                          <Pie data={pieData} cx="50%" cy="50%" labelLine={false} label={({ name, percent }) => `${name}: ${(percent*100).toFixed(0)}%`} outerRadius={90} dataKey="value">
+                            {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]}/>)}
                           </Pie>
-                          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #ec4899', borderRadius: '8px', fontSize: '12px' }} />
+                          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #ec4899', borderRadius: '8px', fontSize: '12px' }}/>
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
                   )}
-
-                  {/* Multi-Series Line Chart */}
-                  {chartData.length > 0 && (
-                    <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-xl p-4 sm:p-6 border border-purple-500/30">
-                      <h3 className="text-base sm:text-lg font-bold text-white mb-4 flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 text-purple-400" />
-                        Multi-Metric Comparison
-                        <span className="ml-auto text-xs text-purple-300">📌 Trend Patterns</span>
-                      </h3>
-                      <ResponsiveContainer width="100%" height={280}>
-                        <LineChart data={chartData.slice(0, 15)}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3} />
-                          <XAxis 
-                            dataKey="name" 
-                            tick={{ fontSize: 10, fill: '#c4b5fd' }}
-                            angle={-45}
-                            textAnchor="end"
-                            height={80}
-                          />
-                          <YAxis tick={{ fontSize: 11, fill: '#c4b5fd' }} />
-                          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px', fontSize: '12px' }} />
-                          <Legend wrapperStyle={{ fontSize: 11 }} />
-                          {Object.keys(chartData[0]).filter(k => k !== 'name').slice(0, 3).map((key, idx) => (
-                            <Line
-                              key={idx}
-                              type="monotone"
-                              dataKey={key}
-                              stroke={COLORS[idx]}
-                              strokeWidth={2}
-                              dot={{ r: 3 }}
-                            />
-                          ))}
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
                 </div>
 
-                {/* Auto Insights for Charts */}
-                <div className="bg-gradient-to-br from-slate-800/80 to-indigo-900/40 backdrop-blur-xl rounded-xl shadow-xl p-4 border border-indigo-500/30">
-                  <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-yellow-400" />
-                    Chart Insights & Recommendations
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-                    {chartData.length > 0 && (
-                      <>
-                        <div className="bg-slate-700/30 p-3 rounded-lg border-l-2 border-green-500">
-                          <p className="text-purple-200">
-                            🏆 <strong className="text-white">Top Performer:</strong> {chartData[0]?.name} leads with{' '}
-                            {chartData[0]?.Sales?.toLocaleString() || 'N/A'} in sales
-                          </p>
-                        </div>
-                        {chartData[chartData.length - 1] && (
-                          <div className="bg-slate-700/30 p-3 rounded-lg border-l-2 border-red-500">
-                            <p className="text-purple-200">
-                              ⚠️ <strong className="text-white">Needs Attention:</strong> {chartData[chartData.length - 1]?.name} requires strategy review
-                            </p>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    {timeSeriesData.length > 1 && (
-                      <div className="bg-slate-700/30 p-3 rounded-lg border-l-2 border-blue-500">
-                        <p className="text-purple-200">
-                          <strong className="text-white">Trend:</strong>{' '}
-                          {timeSeriesData[timeSeriesData.length - 1].Sales > timeSeriesData[0].Sales
-                            ? '📈 Positive growth momentum'
-                            : '📉 Declining trend - investigate causes'}
-                        </p>
-                      </div>
-                    )}
-                    {regionData.length > 0 && (
-                      <>
-                        <div className="bg-slate-700/30 p-3 rounded-lg border-l-2 border-purple-500">
-                          <p className="text-purple-200">
-                            🌍 <strong className="text-white">Best Region:</strong> {regionData[0]?.region} - {regionData[0]?.sales.toLocaleString()} sales
-                          </p>
-                        </div>
-                        {regionData[regionData.length - 1] && (
-                          <div className="bg-slate-700/30 p-3 rounded-lg border-l-2 border-orange-500">
-                            <p className="text-purple-200">
-                              💡 <strong className="text-white">Opportunity:</strong> Focus marketing in {regionData[regionData.length - 1]?.region}
-                            </p>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    {chartData.find(d => d.Profit) && (
-                      <div className="bg-slate-700/30 p-3 rounded-lg border-l-2 border-yellow-500">
-                        <p className="text-purple-200">
-                          💰 <strong className="text-white">Profitability:</strong>{' '}
-                          {(() => {
-                            const totalSales = _.sum(chartData.map(d => d.Sales || 0));
-                            const totalProfit = _.sum(chartData.map(d => d.Profit || 0));
-                            const margin = totalSales > 0 ? ((totalProfit / totalSales) * 100).toFixed(1) : 0;
-                            return `${margin}% margin ${margin > 20 ? '✅' : margin > 10 ? '⚠️' : '🚨'}`;
-                          })()}
-                        </p>
-                      </div>
-                    )}
+                {chartData.some(d => d.Profit !== undefined) && (
+                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl p-4 border border-purple-500/30">
+                    <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2"><DollarSign className="w-5 h-5 text-yellow-400" />Profit vs Sales</h3>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={chartData.slice(0, 12)}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3}/>
+                        <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#c4b5fd' }} angle={-45} textAnchor="end" height={70}/>
+                        <YAxis tick={{ fontSize: 10, fill: '#c4b5fd' }}/>
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #a855f7', borderRadius: '8px', fontSize: '12px' }}/>
+                        <Legend wrapperStyle={{ fontSize: 11 }}/>
+                        <Bar dataKey="Sales" fill="#3b82f6"/>
+                        <Bar dataKey="Profit" fill="#10b981"/>
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
-            {/* Data Tab */}
-            {activeTab === 'data' && (
-              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-xl shadow-2xl p-4 sm:p-6 border border-purple-500/30">
-                <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <Eye className="w-5 h-5 sm:w-6 sm:h-6 text-green-400" />
-                  Raw Data Preview ({filterValue && selectedColumn ? `Filtered: ${getFilteredData().length}` : `All ${data.length}`} rows)
-                </h3>
-                <div className="overflow-x-auto -mx-4 sm:mx-0">
-                  <div className="inline-block min-w-full align-middle">
-                    <table className="min-w-full divide-y divide-purple-500/30">
-                      <thead className="bg-slate-700/50 sticky top-0">
+            {/* ── FORECAST ──────────────────────────────────────────────────── */}
+            {activeTab === 'forecast' && (
+              <div className="space-y-4">
+                <div className="bg-gradient-to-br from-slate-800/80 to-indigo-900/40 rounded-xl p-4 border border-indigo-500/30">
+                  <h3 className="text-base font-bold text-white mb-1 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-400" />Trend Forecasting (Linear Regression)</h3>
+                  <p className="text-xs text-purple-300 mb-4">
+                    Slope: <span className={`font-bold ${slope >= 0 ? 'text-green-400' : 'text-red-400'}`}>{slope.toFixed(2)}</span>
+                    {' '}—                   Trend {slope >= 0 ? '📈 Going Up (Positive)' : '📉 Going Down (Negative)'}
+                  </p>
+                  {forecastData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={320}>
+                      <LineChart data={forecastData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#6b21a8" opacity={0.3}/>
+                        <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#c4b5fd' }} angle={-45} textAnchor="end" height={70}/>
+                        <YAxis tick={{ fontSize: 10, fill: '#c4b5fd' }}/>
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #818cf8', borderRadius: '8px', fontSize: '12px' }}/>
+                        <Legend wrapperStyle={{ fontSize: 11 }}/>
+                        <Line type="monotone" dataKey="Sales" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls={false}/>
+                        <Line type="monotone" dataKey="Forecast" stroke="#f59e0b" strokeWidth={2} strokeDasharray="6 3" dot={{ r: 4 }} connectNulls={false}/>
+                        <Line type="monotone" dataKey="Trend" stroke="#818cf8" strokeWidth={1} strokeDasharray="3 3" dot={false} connectNulls/>
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="text-center py-10 text-purple-300">
+                      <p>📅 Date/Month column aur Sales column chahiye forecast ke liye.</p>
+                      <p className="text-xs mt-2">Column names mein 'date', 'month', 'sales', 'revenue' hona chahiye.</p>
+                    </div>
+                  )}
+                </div>
+                {forecastData.length > 0 && (
+                  <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl p-4 border border-purple-500/30">
+                    <h3 className="text-sm font-bold text-white mb-3">📊 Forecast Summary</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {forecastData.filter(d => d.Forecast !== null).map((d, i) => (
+                        <div key={i} className="bg-slate-700/30 p-3 rounded-lg border border-yellow-500/20">
+                          <p className="text-xs text-purple-300">{d.date}</p>
+                          <p className="text-base font-bold text-yellow-400">{d.Forecast?.toLocaleString()}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── CORRELATION HEATMAP ───────────────────────────────────────── */}
+            {activeTab === 'correlation' && (
+              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl p-4 border border-purple-500/30">
+                <h3 className="text-base font-bold text-white mb-1 flex items-center gap-2">🔥 Correlation Heatmap</h3>
+                <p className="text-xs text-purple-300 mb-4">Green = Strong Positive Relation | Red = Negative Relation | Closer to ±1 = Stronger</p>
+                {corrCols.length >= 2 ? (
+                  <div className="overflow-x-auto">
+                    <table className="mx-auto">
+                      <thead>
                         <tr>
-                          {headers.map((header, idx) => (
-                            <th
-                              key={idx}
-                              className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-purple-200 uppercase tracking-wider whitespace-nowrap"
-                            >
-                              {header}
-                            </th>
-                          ))}
+                          <th className="w-28 p-2"></th>
+                          {corrCols.map(c => <th key={c} className="p-2 text-xs text-purple-300 font-medium w-20 text-center" style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)', height: 80 }}>{c.slice(0,14)}</th>)}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-purple-500/20">
-                        {getFilteredData().slice(0, 100).map((row, idx) => (
-                          <tr key={idx} className="hover:bg-slate-700/30 transition-colors">
-                            {headers.map((header, hIdx) => (
-                              <td
-                                key={hIdx}
-                                className="px-3 sm:px-6 py-4 whitespace-nowrap text-xs sm:text-sm text-purple-200"
-                              >
-                                {row[header] !== null && row[header] !== undefined
-                                  ? String(row[header])
-                                  : '-'}
-                              </td>
-                            ))}
+                      <tbody>
+                        {corrMatrix.map((row, i) => (
+                          <tr key={i}>
+                            <td className="p-2 text-xs text-purple-300 font-medium text-right pr-3 whitespace-nowrap">{corrCols[i].slice(0,14)}</td>
+                            {row.map((val, j) => {
+                              const abs = Math.abs(val);
+                              let bg = 'bg-slate-700/50';
+                              if (i === j) bg = 'bg-purple-500/60';
+                              else if (val > 0.7) bg = 'bg-green-500/80';
+                              else if (val > 0.4) bg = 'bg-green-500/40';
+                              else if (val > 0.1) bg = 'bg-green-500/20';
+                              else if (val < -0.7) bg = 'bg-red-500/80';
+                              else if (val < -0.4) bg = 'bg-red-500/40';
+                              else if (val < -0.1) bg = 'bg-red-500/20';
+                              return (
+                                <td key={j} className={`w-20 h-14 text-center text-xs font-bold rounded m-0.5 ${bg} ${abs > 0.5 ? 'text-white' : 'text-purple-200'}`} title={`${corrCols[i]} vs ${corrCols[j]}: ${val}`}>{val.toFixed(2)}</td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                ) : (
+                  <div className="text-center py-10 text-purple-300">
+                    <p>Heatmap ke liye kam se kam 2 numeric columns chahiye.</p>
+                  </div>
+                )}
+                <div className="mt-4 flex items-center gap-4 text-xs text-purple-300 justify-center">
+                  <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-green-500/80 inline-block"></span> Strong Positive (&gt;0.7)</span>
+                  <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-green-500/30 inline-block"></span> Moderate Positive</span>
+                  <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-red-500/80 inline-block"></span> Strong Negative (&lt;-0.7)</span>
+                  <span className="flex items-center gap-1"><span className="w-4 h-4 rounded bg-purple-500/60 inline-block"></span> Self (1.0)</span>
+                </div>
+              </div>
+            )}
+
+            {/* ── AI CHAT ───────────────────────────────────────────────────── */}
+            {activeTab === 'chat' && (
+              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl border border-purple-500/30 flex flex-col" style={{ height: 560 }}>
+                <div className="p-4 border-b border-purple-500/20 flex items-center gap-3">
+                  <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg"><MessageCircle className="w-5 h-5 text-white"/></div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">AI Data Chat</h3>
+                    <p className="text-xs text-purple-300">Ask questions — Claude will answer in real-time</p>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {chatMessages.length === 0 && (
+                    <div className="text-center py-8">
+                      <Brain className="w-12 h-12 text-purple-400 mx-auto mb-3"/>
+                      <p className="text-purple-200 font-medium">Ask anything about your data!</p>
+                      <div className="mt-4 flex flex-wrap gap-2 justify-center">
+                        {['Which product has the highest sales?','What is the total profit?','Which region has the most sales?','What is the average order value?'].map(q => (
+                          <button key={q} onClick={() => setChatInput(q)}
+                            className="px-3 py-2 bg-slate-700/50 hover:bg-purple-600/30 text-purple-200 rounded-lg text-xs border border-purple-500/30 transition-all text-left">
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {chatMessages.map((m, i) => (
+                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-xs sm:max-w-md px-4 py-3 rounded-2xl text-sm whitespace-pre-wrap ${m.role === 'user' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-br-sm' : 'bg-slate-700/70 text-purple-100 rounded-bl-sm border border-purple-500/20'}`}>
+                        {m.content}
+                      </div>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <div className="flex justify-start">
+                      <div className="bg-slate-700/70 rounded-2xl rounded-bl-sm px-4 py-3 border border-purple-500/20">
+                        <div className="flex gap-1">{[0,1,2].map(i => <span key={i} className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: `${i*0.15}s` }}></span>)}</div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef}/>
+                </div>
+                <div className="p-4 border-t border-purple-500/20">
+                  <div className="flex gap-2">
+                    <input
+                      value={chatInput} onChange={e => setChatInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendChat()}
+                      placeholder="Ask your question here..."
+                      className="flex-1 px-4 py-3 bg-slate-700/50 border border-purple-500/30 rounded-xl text-white text-sm placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
+                      className="px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 text-white rounded-xl transition-all">
+                      <Send className="w-5 h-5"/>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── AI REPORT ─────────────────────────────────────────────────── */}
+            {activeTab === 'report' && (
+              <div className="space-y-4">
+                <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl p-4 border border-purple-500/30">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+                    <div>
+                      <h3 className="text-base font-bold text-white flex items-center gap-2"><FileText className="w-5 h-5 text-purple-400"/>AI Report Generator</h3>
+                      <p className="text-xs text-purple-300">Claude will write an Executive Summary, Key Findings & Recommendations automatically</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={generateReport} disabled={reportLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all">
+                        {reportLoading ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Zap className="w-4 h-4"/>}
+                        {reportLoading ? 'Generating...' : 'Generate Report'}
+                      </button>
+                      {report && (
+                        <button onClick={downloadReport}
+                          className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-all">
+                          <Download className="w-4 h-4"/>Download
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {!report && !reportLoading && (
+                    <div className="text-center py-10 text-purple-300">
+                      <FileText className="w-12 h-12 mx-auto mb-3 text-purple-400"/>
+                      <p>"Generate Report" button click karein</p>
+                      <p className="text-xs text-purple-300">AI Chat — Ask questions about your data</p>
+                    <p className="text-xs text-purple-300 mt-1">Click "Generate Report" to get started</p>
+                    <p className="text-xs text-purple-300 mt-1">Claude will write an Executive Summary, Key Findings & Recommendations automatically</p>
+                    </div>
+                  )}
+                  {reportLoading && (
+                    <div className="text-center py-10">
+                      <div className="animate-spin rounded-full h-10 w-10 border-b-4 border-purple-500 mx-auto mb-4"></div>
+                      <p className="text-purple-200">Claude report likh raha hai...</p>
+                    </div>
+                  )}
+                  {report && (
+                    <div className="bg-slate-900/50 rounded-xl p-4 border border-purple-500/20 max-h-96 overflow-y-auto">
+                      <pre className="text-sm text-purple-100 whitespace-pre-wrap font-sans leading-relaxed">{report}</pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── DATA TABLE ────────────────────────────────────────────────── */}
+            {activeTab === 'data' && (
+              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl shadow-2xl p-4 border border-purple-500/30">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Eye className="w-5 h-5 text-green-400"/>Data Preview</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  <div>
+                    <label className="block text-xs text-purple-300 mb-1">Column Filter</label>
+                    <select value={selectedColumn} onChange={e => setSelectedColumn(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+                      <option value="">All Columns</option>
+                      {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-purple-300 mb-1">Search</label>
+                    <input value={filterValue} onChange={e => setFilterValue(e.target.value)} placeholder="Type to filter..."
+                      className="w-full px-3 py-2 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-500"/>
+                  </div>
+                </div>
+                {filterValue && <p className="text-xs text-purple-300 mb-3">Showing {getFiltered().length} of {data.length} records</p>}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-purple-500/30">
+                    <thead className="bg-slate-700/50">
+                      <tr>{headers.map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-purple-300 uppercase whitespace-nowrap">{h}</th>)}</tr>
+                    </thead>
+                    <tbody className="divide-y divide-purple-500/20">
+                      {getFiltered().slice(0, 100).map((row, i) => (
+                        <tr key={i} className="hover:bg-slate-700/30">
+                          {headers.map(h => <td key={h} className="px-4 py-3 text-xs text-purple-200 whitespace-nowrap">{row[h] ?? '-'}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
@@ -1548,25 +888,17 @@ const DataAnalysisDashboard = () => {
 
       {/* Footer */}
       <div className="border-t border-purple-500/30 bg-gradient-to-r from-slate-800 to-purple-900 mt-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <p className="text-center text-xs text-purple-300/80">
-            Developed by:{' '}
-            {developers.map((dev, idx) => (
-              <React.Fragment key={dev.name}>
-                <button
-                  onClick={() => handleDeveloperClick(dev)}
-                  className="text-purple-400 hover:text-purple-300 underline decoration-dotted hover:decoration-solid transition-all"
-                >
-                  {dev.name}
-                </button>
-                {idx < developers.length - 1 && <span className="mx-2">•</span>}
-              </React.Fragment>
-            ))}
-          </p>
+        <div className="max-w-7xl mx-auto px-4 py-4 text-center text-xs text-purple-300/80">
+          Developed by:{' '}
+          {developers.map((d, i) => (
+            <React.Fragment key={d.name}>
+              <button onClick={() => { setSelDev(d); setShowDev(true); }} className="text-purple-400 hover:text-purple-300 underline decoration-dotted">{d.name}</button>
+              {i < developers.length - 1 && <span className="mx-2">•</span>}
+            </React.Fragment>
+          ))}
+          {' '} | GEC Vaishali, CSE(IOT)
         </div>
       </div>
     </div>
   );
-};
-
-export default DataAnalysisDashboard;
+}
