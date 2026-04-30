@@ -63,7 +63,7 @@ export default function Dashboard() {
   const [dataQuality, setDataQuality] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [aiInsights, setAiInsights] = useState([]);
-  const [isDragging, setIsDragging] = useState(false);
+  const [isDragging] = useState(false);
   const [selectedColumn, setSelectedColumn] = useState('');
   const [filterValue, setFilterValue] = useState('');
   const [showDev, setShowDev] = useState(false);
@@ -125,11 +125,10 @@ export default function Dashboard() {
   const handleFileInput = (e) => { if (e.target.files[0]) processFile(e.target.files[0]); };
 
   // Drag & Drop
-  const onCardDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
-  const onCardDragLeave = (e) => { e.preventDefault(); setIsDragging(false); };
+  const onCardDragOver = (e) => { e.preventDefault(); };
+  const onCardDragLeave = (e) => { e.preventDefault(); };
   const onCardDrop = (e) => {
     e.preventDefault();
-    setIsDragging(false);
     const f = e.dataTransfer.files[0];
     if (f) processFile(f);
   };
@@ -436,10 +435,10 @@ export default function Dashboard() {
                 onDragOver={onCardDragOver}
                 onDragLeave={onCardDragLeave}
                 onDrop={onCardDrop}
-                className={`bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-10 border-2 border-dashed transition-all ${isDragging ? 'border-purple-300 bg-purple-700/30' : 'border-purple-500/50 hover:border-purple-400'}`}>
-                <Upload className={`w-20 h-20 mx-auto mb-6 ${isDragging ? 'text-white animate-bounce' : 'text-purple-400 animate-bounce'}`} />
-                <h2 className="text-2xl font-bold text-white mb-2">{isDragging ? 'Release to Upload!' : 'Drop Your File Here'}</h2>
-                <p className="text-purple-300 mb-6">or click the button below to select a file</p>
+                className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-10 border-2 border-dashed border-purple-500/50">
+                <Upload className="w-20 h-20 text-purple-400 mx-auto mb-6" />
+                <h2 className="text-2xl font-bold text-white mb-2">Upload Your File</h2>
+                <p className="text-purple-300 mb-6">Click the button below or drag and drop a file here</p>
                 <div className="grid grid-cols-2 gap-3 mb-6 text-left">
                   {[['🤖','AI Chat — Ask questions about your data'],['📄','Auto Report — Analysis in 1 click'],['📈','Trend Forecast — Future predictions'],['🔥','Correlation Heatmap — Column relationships']].map(([icon, txt]) => (
                     <div key={txt} className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/20">
