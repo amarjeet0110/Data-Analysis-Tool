@@ -125,11 +125,14 @@ export default function Dashboard() {
   const handleFileInput = (e) => { if (e.target.files[0]) processFile(e.target.files[0]); };
 
   // Drag & Drop
-  const onDragOver = useCallback((e) => { e.preventDefault(); setIsDragging(true); }, []);
-  const onDragLeave = useCallback(() => setIsDragging(false), []);
+  const dragCounter = useRef(0);
+  const onDragOver = useCallback((e) => { e.preventDefault(); }, []);
+  const onDragEnter = useCallback((e) => { e.preventDefault(); dragCounter.current++; if (e.dataTransfer.items && e.dataTransfer.items.length > 0) setIsDragging(true); }, []);
+  const onDragLeave = useCallback((e) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current === 0) setIsDragging(false); }, []);
   const onDrop = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
+    dragCounter.current = 0;
     setIsDragging(false);
     const f = e.dataTransfer.files[0];
     if (f) processFile(f);
@@ -355,10 +358,10 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900"
-      onDragOver={!loading ? onDragOver : undefined} onDragLeave={!loading ? onDragLeave : undefined} onDrop={!loading ? onDrop : undefined}>
+      onDragOver={onDragOver} onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDrop={onDrop}>
 
       {/* Drag Overlay */}
-      {isDragging && (
+      {isDragging && !loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-purple-900/80 backdrop-blur-sm border-4 border-dashed border-purple-400 pointer-events-none">
           <div className="text-center">
             <Upload className="w-20 h-20 text-purple-300 mx-auto mb-4 animate-bounce" />
@@ -434,11 +437,10 @@ export default function Dashboard() {
         {!loading && !data && (
           <div className="text-center py-12">
             <div className="max-w-lg mx-auto">
-              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-10 border-2 border-dashed border-purple-500/50 hover:border-purple-400 transition-all cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}>
+              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-10 border-2 border-dashed border-purple-500/50 hover:border-purple-400 transition-all">
                 <Upload className="w-20 h-20 text-purple-400 mx-auto mb-6 animate-bounce" />
                 <h2 className="text-2xl font-bold text-white mb-2">Drop Your File Here</h2>
-                <p className="text-purple-300 mb-6">or click to select a file</p>
+                <p className="text-purple-300 mb-6">or click the button below to select a file</p>
                 <div className="grid grid-cols-2 gap-3 mb-6 text-left">
                   {[['🤖','AI Chat — Ask questions about your data'],['📄','Auto Report — Analysis in 1 click'],['📈','Trend Forecast — Future predictions'],['🔥','Correlation Heatmap — Column relationships']].map(([icon, txt]) => (
                     <div key={txt} className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/20">
@@ -447,10 +449,12 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-2 justify-center">
-                  <span className="px-3 py-1 bg-purple-500/30 text-purple-200 rounded-full text-sm border border-purple-400/30">CSV</span>
-                  <span className="px-3 py-1 bg-green-500/30 text-green-200 rounded-full text-sm border border-green-400/30">Excel (.xlsx)</span>
-                </div>
+                <label className="cursor-pointer mt-4 inline-block">
+                  <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileInput} className="hidden" />
+                  <div className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg shadow-lg transition-all transform hover:scale-105 font-semibold">
+                    <Upload className="w-5 h-5" /><span>Choose File</span>
+                  </div>
+                </label>
               </div>
             </div>
           </div>
