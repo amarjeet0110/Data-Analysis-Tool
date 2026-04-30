@@ -30,15 +30,10 @@ const pearsonCorr = (a, b) => {
 };
 
 // ─── Claude API call ─────────────────────────────────────────────────────────
-  const callClaude = async (messages, system = '') => {
+const callClaude = async (messages, system = '') => {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': '',
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
@@ -46,7 +41,6 @@ const pearsonCorr = (a, b) => {
       messages
     })
   });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
   const d = await res.json();
   return d.content?.map(c => c.text || '').join('') || '';
 };
@@ -92,7 +86,6 @@ export default function Dashboard() {
 
   // ── File Processing ────────────────────────────────────────────────────────
   const processFile = async (uploadedFile) => {
-    setIsDragging(false);
     setFile(uploadedFile);
     setLoading(true);
     setActiveTab('overview');
@@ -118,18 +111,20 @@ export default function Dashboard() {
       setDataQuality(analyzeQuality(result.data, result.headers));
       setAlerts(genAlerts(result.data, result.headers));
       setAiInsights(genAIInsights(result.data, result.headers));
-    } catch (e) { console.error(e);                     alert('Error processing file. Please check the file format and try again.'); }
+    } catch (e) { console.error(e); alert('File process karne mein error aaya.'); }
     setLoading(false);
   };
 
   const handleFileInput = (e) => { if (e.target.files[0]) processFile(e.target.files[0]); };
 
   // Drag & Drop
-  const onCardDrop = (e) => {
-    e.preventDefault();
+  const onDragOver = useCallback((e) => { e.preventDefault(); setIsDragging(true); }, []);
+  const onDragLeave = useCallback(() => setIsDragging(false), []);
+  const onDrop = useCallback((e) => {
+    e.preventDefault(); setIsDragging(false);
     const f = e.dataTransfer.files[0];
     if (f) processFile(f);
-  };
+  }, []);
 
   // ── Analytics Helpers ──────────────────────────────────────────────────────
   const numCols = (h, d) => h.filter(c => d.some(r => typeof r[c] === 'number'));
@@ -182,13 +177,13 @@ export default function Dashboard() {
     if (sc && namec) {
       const grouped = _.groupBy(d, namec);
       const top = _.maxBy(Object.entries(grouped).map(([k, v]) => ({ k, s: _.sum(v.map(r => r[sc]).filter(n => typeof n === 'number')) })), 's');
-      if (top) ins.push({ type: 'success', title: 'Top Performer', description: `${top.k} is the best-selling product with ₹${top.s.toLocaleString('en-IN')} in sales`, icon: Zap });
+      if (top) ins.push({ type: 'success', title: 'Top Performer', description: `${top.k} is the best seller — ${top.s.toLocaleString()} in sales`, icon: Zap });
     }
     if (sc && pc) {
       const ts = _.sum(d.map(r => r[sc]).filter(n => typeof n === 'number'));
       const tp = _.sum(d.map(r => r[pc]).filter(n => typeof n === 'number'));
       const m = ts > 0 ? ((tp / ts) * 100).toFixed(1) : 0;
-      ins.push({ type: m > 15 ? 'success' : 'warning', title: 'Profit Margin', description: `Overall margin: ${m}% — ${m < 15 ? 'Consider optimizing costs or pricing' : 'Healthy margin maintained!'}`, icon: Activity });
+      ins.push({ type: m > 15 ? 'success' : 'warning', title: 'Profit Margin', description: `Overall margin: ${m}% — ${m < 15 ? 'Consider optimizing costs' : 'Healthy margin!'}`, icon: Activity });
     }
     return ins;
   };
@@ -262,14 +257,14 @@ export default function Dashboard() {
     const sc = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
     if (sc) {
       const v = data.map(r => r[sc]).filter(n => typeof n === 'number');
-      kpis.push(    { title: 'Total Revenue', value: totalSales.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
-      kpis.push({ title: 'Avg Order Value', value: avgSales.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
+      kpis.push({ title: 'Total Sales', value: _.sum(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
+      kpis.push({ title: 'Avg Order', value: _.mean(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
     }
     const pc = headers.find(c => c.toLowerCase().includes('profit'));
     if (pc) {
       const v = data.map(r => r[pc]).filter(n => typeof n === 'number');
       const tot = _.sum(v);
-      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: Math.abs(tot).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
+      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: Math.abs(tot).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
     }
     const namc = headers.find(c => ['product','item','name'].some(k => c.toLowerCase().includes(k)));
     if (namc) kpis.push({ title: 'Total Products', value: new Set(data.map(r => r[namc])).size, icon: Package, color: 'from-purple-500 to-purple-600', borderColor: 'border-purple-500/30' });
@@ -319,7 +314,7 @@ export default function Dashboard() {
       const prompt = `Based on the data below, write a complete professional business analysis report:\n\nDataset Info:\n- Total rows: ${data.length}\n- Columns: ${headers.join(', ')}\n- Statistics: ${JSON.stringify(s)}\n\nReport format:\n## 📊 Executive Summary\n## 🔍 Key Findings\n## 📈 Trend Analysis\n## ⚠️ Areas of Concern\n## 💡 Recommendations\n## ✅ Conclusion\n\nInclude specific numbers and insights in each section. Keep it professional and concise.`;
       const rep = await callClaude([{ role: 'user', content: prompt }], sys);
       setReport(rep);
-    } catch (e) { setReport(`❌ Error: ${e.message}. Make sure the Anthropic API key is configured.`); }
+    } catch (e) { setReport('❌ Error generating report. Please try again.'); }
     setReportLoading(false);
   };
 
@@ -350,10 +345,11 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900"
+      onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
 
       {/* Drag Overlay */}
-      {isDragging && !loading && (
+      {isDragging && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-purple-900/80 backdrop-blur-sm border-4 border-dashed border-purple-400 pointer-events-none">
           <div className="text-center">
             <Upload className="w-20 h-20 text-purple-300 mx-auto mb-4 animate-bounce" />
@@ -374,7 +370,7 @@ export default function Dashboard() {
               </div>
               <h3 className="text-2xl font-bold text-white mb-4">{selDev.fullName}</h3>
               <div className="text-left bg-slate-700/30 rounded-lg p-4 space-y-2 mb-4">
-                                  <p className="text-xs text-purple-300 mb-1">{row.regNo}</p>
+                <p className="text-purple-200"><span className="font-semibold text-white">Reg No:</span> {selDev.regNo}</p>
                 <p className="text-purple-200"><span className="font-semibold text-white">Course:</span> {selDev.course}</p>
                 <p className="text-purple-200"><span className="font-semibold text-white">College:</span> {selDev.college}</p>
               </div>
@@ -420,7 +416,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-center py-24">
             <div className="text-center">
               <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-500 mx-auto"></div>
-              <p className="mt-4 text-purple-200 font-medium">Processing your file...</p>
+              <p className="mt-4 text-purple-200 font-medium">File process ho rahi hai...</p>
             </div>
           </div>
         )}
@@ -429,10 +425,11 @@ export default function Dashboard() {
         {!loading && !data && (
           <div className="text-center py-12">
             <div className="max-w-lg mx-auto">
-              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-10 border-2 border-dashed border-purple-500/50">
-                <Upload className="w-20 h-20 text-purple-400 mx-auto mb-6" />
-                <h2 className="text-2xl font-bold text-white mb-2">Upload Your File</h2>
-                <p className="text-purple-300 mb-6">Click the button below to select a file</p>
+              <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 backdrop-blur-xl rounded-2xl shadow-2xl p-10 border-2 border-dashed border-purple-500/50 hover:border-purple-400 transition-all cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}>
+                <Upload className="w-20 h-20 text-purple-400 mx-auto mb-6 animate-bounce" />
+                <h2 className="text-2xl font-bold text-white mb-2">Drop Your File Here</h2>
+                <p className="text-purple-300 mb-6">or click to select a file</p>
                 <div className="grid grid-cols-2 gap-3 mb-6 text-left">
                   {[['🤖','AI Chat — Ask questions about your data'],['📄','Auto Report — Analysis in 1 click'],['📈','Trend Forecast — Future predictions'],['🔥','Correlation Heatmap — Column relationships']].map(([icon, txt]) => (
                     <div key={txt} className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/20">
@@ -441,12 +438,10 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
-                <label className="cursor-pointer mt-4 inline-block">
-                  <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileInput} className="hidden" />
-                  <div className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg shadow-lg transition-all transform hover:scale-105 font-semibold">
-                    <Upload className="w-5 h-5" /><span>Choose File</span>
-                  </div>
-                </label>
+                <div className="flex gap-2 justify-center">
+                  <span className="px-3 py-1 bg-purple-500/30 text-purple-200 rounded-full text-sm border border-purple-400/30">CSV</span>
+                  <span className="px-3 py-1 bg-green-500/30 text-green-200 rounded-full text-sm border border-green-400/30">Excel (.xlsx)</span>
+                </div>
               </div>
             </div>
           </div>
