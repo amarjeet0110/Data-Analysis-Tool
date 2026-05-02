@@ -297,10 +297,18 @@ export default function Dashboard() {
     setChatLoading(true);
     try {
       const summary = JSON.stringify(data.slice(0, 50));
-      const sys = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${summary}\nTotal rows: ${data.length}\nAnswer the user's questions clearly and precisely with numbers and insights.`;
-      const reply = await callClaude(newMsgs, sys);
+      const sys = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${summary}\nTotal rows: ${data.length}\nAnswer the user's questions clearly and precisely with numbers and insights. Always respond in English.`;
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: sys, messages: newMsgs })
+      });
+      const d = await res.json();
+      const reply = d.content?.map(c => c.text || '').join('') || 'No response received.';
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
-    } catch (e) {       setChatMessages(prev => [...prev, { role: 'assistant', content: '❌ API error occurred. Please try again.' }]); }
+    } catch (e) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: '❌ Something went wrong. Please try again.' }]);
+    }
     setChatLoading(false);
   };
 
@@ -310,9 +318,16 @@ export default function Dashboard() {
     setReportLoading(true); setReport('');
     try {
       const s = calcStats(data, headers);
-      const sys = `You are a senior business analyst. Write a complete professional business analysis report.`;
-      const prompt = `Based on the data below, write a complete professional business analysis report:\n\nDataset Info:\n- Total rows: ${data.length}\n- Columns: ${headers.join(', ')}\n- Statistics: ${JSON.stringify(s)}\n\nReport format:\n## 📊 Executive Summary\n## 🔍 Key Findings\n## 📈 Trend Analysis\n## ⚠️ Areas of Concern\n## 💡 Recommendations\n## ✅ Conclusion\n\nInclude specific numbers and insights in each section. Keep it professional and concise.`;
-      const rep = await callClaude([{ role: 'user', content: prompt }], sys);
+      const dataSample = JSON.stringify(data.slice(0, 80));
+      const sys = `You are a senior business analyst. Write a complete professional business analysis report strictly based on the data provided. Always respond in English.`;
+      const prompt = `Based on the dataset below, write a complete professional business analysis report:\n\nDataset Info:\n- Total rows: ${data.length}\n- Columns: ${headers.join(', ')}\n- Statistics: ${JSON.stringify(s)}\n- Data sample (first 80 rows): ${dataSample}\n\nReport format:\n## 📊 Executive Summary\n## 🔍 Key Findings\n## 📈 Trend Analysis\n## ⚠️ Areas of Concern\n## 💡 Recommendations\n## ✅ Conclusion\n\nInclude specific numbers from the data in each section. Keep it professional, accurate, and concise.`;
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: sys, messages: [{ role: 'user', content: prompt }] })
+      });
+      const d = await res.json();
+      const rep = d.content?.map(c => c.text || '').join('') || 'No report generated.';
       setReport(rep);
     } catch (e) { setReport('❌ Error generating report. Please try again.'); }
     setReportLoading(false);
@@ -429,9 +444,9 @@ export default function Dashboard() {
                 onClick={() => fileInputRef.current?.click()}>
                 <Upload className="w-20 h-20 text-purple-400 mx-auto mb-6 animate-bounce" />
                 <h2 className="text-2xl font-bold text-white mb-2">Drop Your File Here</h2>
-                <p className="text-purple-300 mb-6">or click to select a file</p>
+                <p className="text-purple-300 mb-6">or click to browse files</p>
                 <div className="grid grid-cols-2 gap-3 mb-6 text-left">
-                  {[['🤖','AI Chat — Ask questions about your data'],['📄','Auto Report — Analysis in 1 click'],['📈','Trend Forecast — Future predictions'],['🔥','Correlation Heatmap — Column relationships']].map(([icon, txt]) => (
+                  {[['🤖','AI Chat — Ask questions about your data'],['📄','Auto Report — One click analysis'],['📈','Trend Forecast — Future predictions'],['🔥','Correlation Heatmap — Column relationships']].map(([icon, txt]) => (
                     <div key={txt} className="bg-slate-700/30 p-3 rounded-lg border border-purple-500/20">
                       <span className="text-lg">{icon}</span>
                       <p className="text-xs text-purple-200 mt-1">{txt}</p>
