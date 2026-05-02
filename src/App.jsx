@@ -69,8 +69,12 @@ export default function Dashboard() {
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef(null);
 
-  // AI Report
-  const [report, setReport] = useState('');
+  const chatSuggestions = [
+    ['Which product has the highest sales?','What is the total profit?','Which region performs best?','What is the average order value?'],
+    ['Show me the top 3 products by revenue.','Which category has the lowest sales?','What is the profit margin overall?','Are there any negative profit items?'],
+    ['What trends do you see in the data?','Which month had the highest sales?','Compare sales vs profit across products.','What recommendations do you have?'],
+  ];
+  const [suggIdx, setSuggIdx] = useState(0);
   const [reportLoading, setReportLoading] = useState(false);
 
   const fileInputRef = useRef(null);
@@ -257,14 +261,14 @@ export default function Dashboard() {
     const sc = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
     if (sc) {
       const v = data.map(r => r[sc]).filter(n => typeof n === 'number');
-      kpis.push({ title: 'Total Sales', value: _.sum(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
-      kpis.push({ title: 'Avg Order', value: _.mean(v).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
+      kpis.push({ title: 'Total Sales', value: '₹' + _.sum(v).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
+      kpis.push({ title: 'Avg Order', value: '₹' + _.mean(v).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
     }
     const pc = headers.find(c => c.toLowerCase().includes('profit'));
     if (pc) {
       const v = data.map(r => r[pc]).filter(n => typeof n === 'number');
       const tot = _.sum(v);
-      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: Math.abs(tot).toLocaleString(undefined, { maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
+      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: '₹' + Math.abs(tot).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
     }
     const namc = headers.find(c => ['product','item','name'].some(k => c.toLowerCase().includes(k)));
     if (namc) kpis.push({ title: 'Total Products', value: new Set(data.map(r => r[namc])).size, icon: Package, color: 'from-purple-500 to-purple-600', borderColor: 'border-purple-500/30' });
@@ -301,11 +305,13 @@ export default function Dashboard() {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: sys, messages: newMsgs })
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: sys, messages: newMsgs.map(m => ({ role: m.role, content: m.content })) })
       });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error?.message || res.statusText); }
       const d = await res.json();
-      const reply = d.content?.map(c => c.text || '').join('') || 'No response received.';
+      const reply = d.content?.filter(c => c.type === 'text').map(c => c.text).join('') || 'No response received.';
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      setSuggIdx(i => (i + 1) % chatSuggestions.length);
     } catch (e) {
       setChatMessages(prev => [...prev, { role: 'assistant', content: '❌ Something went wrong. Please try again.' }]);
     }
@@ -428,10 +434,69 @@ export default function Dashboard() {
 
         {/* Loading */}
         {loading && (
-          <div className="flex items-center justify-center py-24">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-500 mx-auto"></div>
-              <p className="mt-4 text-purple-200 font-medium">File process ho rahi hai...</p>
+          <div className="flex items-center justify-center py-16">
+            <div className="text-center w-full max-w-md px-4">
+              <style>{`
+                @keyframes barPulse { 0%,100%{transform:scaleY(0.2);opacity:0.3} 50%{transform:scaleY(1);opacity:1} }
+                @keyframes lineDraw { 0%{stroke-dashoffset:400} 100%{stroke-dashoffset:0} }
+                @keyframes pieSpin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+                @keyframes dotBounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+                @keyframes fadeInOut { 0%,100%{opacity:0.3} 50%{opacity:1} }
+                @keyframes scaleIn { 0%{transform:scale(0.5);opacity:0} 100%{transform:scale(1);opacity:1} }
+              `}</style>
+
+              {/* Bar Chart Animation */}
+              <div className="bg-slate-800/60 rounded-2xl p-5 mb-3 border border-purple-500/20">
+                <p className="text-xs text-purple-400 mb-3 uppercase tracking-widest">Loading Bar Chart</p>
+                <div className="flex items-end justify-center gap-1.5" style={{height:60}}>
+                  {[45,70,30,85,55,75,40,90,60,50,80,35].map((h,i)=>(
+                    <div key={i} className="rounded-t" style={{width:14,height:h,background:'linear-gradient(to top,#7c3aed,#ec4899)',animation:`barPulse 1.2s ease-in-out ${i*0.1}s infinite`,transformOrigin:'bottom'}}/>
+                  ))}
+                </div>
+              </div>
+
+              {/* Line Graph Animation */}
+              <div className="bg-slate-800/60 rounded-2xl p-5 mb-3 border border-purple-500/20">
+                <p className="text-xs text-purple-400 mb-3 uppercase tracking-widest">Loading Line Chart</p>
+                <svg viewBox="0 0 300 80" className="w-full" style={{height:70}}>
+                  <defs>
+                    <linearGradient id="lg1" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.4"/>
+                      <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0"/>
+                    </linearGradient>
+                  </defs>
+                  <path d="M0,60 L25,45 L50,55 L75,30 L100,40 L125,20 L150,35 L175,15 L200,25 L225,10 L250,20 L275,8 L300,15" fill="none" stroke="#8b5cf6" strokeWidth="2.5" strokeDasharray="400" style={{animation:'lineDraw 2s ease-in-out infinite alternate'}}/>
+                  <path d="M0,60 L25,50 L50,65 L75,45 L100,55 L125,35 L150,50 L175,30 L200,42 L225,25 L250,38 L275,20 L300,30" fill="none" stroke="#ec4899" strokeWidth="2" strokeDasharray="400" style={{animation:'lineDraw 2s ease-in-out 0.4s infinite alternate'}}/>
+                  {[{x:75,y:30},{x:125,y:20},{x:175,y:15},{x:225,y:10},{x:275,y:8}].map((p,i)=>(
+                    <circle key={i} cx={p.x} cy={p.y} r="4" fill="#8b5cf6" style={{animation:`dotBounce 1.2s ease-in-out ${i*0.2}s infinite`}}/>
+                  ))}
+                </svg>
+              </div>
+
+              {/* Pie + Dots row */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-slate-800/60 rounded-2xl p-4 border border-purple-500/20">
+                  <p className="text-xs text-purple-400 mb-2 uppercase tracking-widest">Pie Chart</p>
+                  <div className="flex justify-center">
+                    <svg viewBox="0 0 60 60" style={{width:60,height:60,animation:'pieSpin 3s linear infinite'}}>
+                      <circle cx="30" cy="30" r="22" fill="none" stroke="#7c3aed" strokeWidth="10" strokeDasharray="70 69"/>
+                      <circle cx="30" cy="30" r="22" fill="none" stroke="#ec4899" strokeWidth="10" strokeDasharray="40 99" strokeDashoffset="-70"/>
+                      <circle cx="30" cy="30" r="22" fill="none" stroke="#10b981" strokeWidth="10" strokeDasharray="28 111" strokeDashoffset="-110"/>
+                    </svg>
+                  </div>
+                </div>
+                <div className="bg-slate-800/60 rounded-2xl p-4 border border-purple-500/20 flex flex-col items-center justify-center">
+                  <p className="text-xs text-purple-400 mb-3 uppercase tracking-widest">Processing</p>
+                  <div className="flex gap-2">
+                    {[0,1,2,3].map(i=>(
+                      <div key={i} style={{width:10,height:10,borderRadius:'50%',background:'linear-gradient(135deg,#8b5cf6,#ec4899)',animation:`dotBounce 0.8s ease-in-out ${i*0.15}s infinite`}}/>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-purple-200 font-semibold text-lg tracking-wide" style={{animation:'fadeInOut 2s ease-in-out infinite'}}>Analyzing your data...</p>
+              <p className="text-purple-400 text-xs mt-1">Building charts, insights & statistics</p>
             </div>
           </div>
         )}
@@ -768,17 +833,9 @@ export default function Dashboard() {
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {chatMessages.length === 0 && (
-                    <div className="text-center py-8">
+                    <div className="text-center py-6">
                       <Brain className="w-12 h-12 text-purple-400 mx-auto mb-3"/>
                       <p className="text-purple-200 font-medium">Ask anything about your data!</p>
-                      <div className="mt-4 flex flex-wrap gap-2 justify-center">
-                        {['Which product has the highest sales?','What is the total profit?','Which region has the most sales?','What is the average order value?'].map(q => (
-                          <button key={q} onClick={() => setChatInput(q)}
-                            className="px-3 py-2 bg-slate-700/50 hover:bg-purple-600/30 text-purple-200 rounded-lg text-xs border border-purple-500/30 transition-all text-left">
-                            {q}
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   )}
                   {chatMessages.map((m, i) => (
@@ -796,6 +853,17 @@ export default function Dashboard() {
                     </div>
                   )}
                   <div ref={chatEndRef}/>
+                </div>
+                <div className="px-4 pt-2 pb-1 border-t border-purple-500/10">
+                  <p className="text-xs text-purple-400 mb-1.5">Suggestions:</p>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {chatSuggestions[suggIdx].map(q => (
+                      <button key={q} onClick={() => setChatInput(q)}
+                        className="px-2.5 py-1.5 bg-slate-700/50 hover:bg-purple-600/30 text-purple-200 rounded-lg text-xs border border-purple-500/30 transition-all text-left">
+                        {q}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="p-4 border-t border-purple-500/20">
                   <div className="flex gap-2">
