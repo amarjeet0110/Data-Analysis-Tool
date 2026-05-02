@@ -60,6 +60,7 @@ export default function Dashboard() {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedColumn, setSelectedColumn] = useState('');
   const [filterValue, setFilterValue] = useState('');
+  const [report, setReport] = useState('');
   const [showDev, setShowDev] = useState(false);
   const [selDev, setSelDev] = useState(null);
 
