@@ -296,10 +296,7 @@ export default function Dashboard() {
   // ── AI Chat ────────────────────────────────────────────────────────────────
   const sendChat = async () => {
     if (!chatInput.trim() || !data) return;
-    if (!geminiKey.trim()) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: '❌ Pehle apni Gemini API Key enter karein upar wale input mein.' }]);
-      return;
-    }
+
     const userMsg = { role: 'user', content: chatInput };
     const newMsgs = [...chatMessages, userMsg];
     setChatMessages(newMsgs);
