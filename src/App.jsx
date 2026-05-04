@@ -313,19 +313,29 @@ export default function Dashboard() {
       ];
 
       const dataSummary = JSON.stringify(data.slice(0, 50));
-      const sys = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${dataSummary}\nTotal rows: ${data.length}\nAnswer clearly and precisely with numbers and insights. Always respond in English.`;
+      const systemPrompt = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${dataSummary}\nTotal rows: ${data.length}\nAnswer clearly and precisely with numbers and insights. Always respond in English.`;
 
-      const res = await fetch('https://data-analysis-tool-xi.vercel.app/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: sys,
-          messages: newMsgs.map(m => ({ role: m.role, content: m.content }))
-        })
-      });
+      // Build Gemini contents — system prompt as first user turn
+      const geminiContents = [
+        { role: 'user', parts: [{ text: `System Instructions: ${systemPrompt}\n\nUser: ${newMsgs[0].content}` }] },
+        { role: 'model', parts: [{ text: 'Understood. I will follow these instructions and answer based on the dataset.' }] },
+        ...newMsgs.slice(1).map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }]
+        }))
+      ];
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: geminiContents, generationConfig: { maxOutputTokens: 1000, temperature: 0.7 } })
+        }
+      );
       if (!res.ok) { const err = await res.json(); throw new Error(err.error?.message || res.statusText); }
       const d = await res.json();
-      const reply = d.content?.[0]?.text || 'No response received.';
+      const reply = d.candidates?.[0]?.content?.parts?.[0]?.text || 'No response received.';
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       setSuggIdx(i => (i + 1) % chatSuggestions.length);
     } catch (e) {
