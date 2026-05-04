@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [geminiKey, setGeminiKey] = useState('');
   const chatEndRef = useRef(null);
 
   const chatSuggestions = [
@@ -295,6 +296,10 @@ export default function Dashboard() {
   // ── AI Chat ────────────────────────────────────────────────────────────────
   const sendChat = async () => {
     if (!chatInput.trim() || !data) return;
+    if (!geminiKey.trim()) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: '❌ Pehle apni Gemini API Key enter karein upar wale input mein.' }]);
+      return;
+    }
     const userMsg = { role: 'user', content: chatInput };
     const newMsgs = [...chatMessages, userMsg];
     setChatMessages(newMsgs);
@@ -302,19 +307,29 @@ export default function Dashboard() {
     setChatLoading(true);
     try {
       const summary = JSON.stringify(data.slice(0, 50));
-      const sys = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${summary}\nTotal rows: ${data.length}\nAnswer the user's questions clearly and precisely with numbers and insights. Always respond in English.`;
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: sys, messages: newMsgs.map(m => ({ role: m.role, content: m.content })) })
-      });
+      const systemContext = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${summary}\nTotal rows: ${data.length}\nAnswer the user's questions clearly and precisely with numbers and insights. Always respond in English.`;
+
+      // Build Gemini contents array (no system role — prepend as first user turn)
+      const contents = [
+        { role: 'user', parts: [{ text: systemContext + '\n\nUser question: ' + newMsgs[0].content }] },
+        ...newMsgs.slice(1).map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }))
+      ];
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey.trim()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents })
+        }
+      );
       if (!res.ok) { const err = await res.json(); throw new Error(err.error?.message || res.statusText); }
       const d = await res.json();
-      const reply = d.content?.filter(c => c.type === 'text').map(c => c.text).join('') || 'No response received.';
+      const reply = d.candidates?.[0]?.content?.parts?.[0]?.text || 'No response received.';
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       setSuggIdx(i => (i + 1) % chatSuggestions.length);
     } catch (e) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: '❌ Something went wrong. Please try again.' }]);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: `❌ Error: ${e.message}` }]);
     }
     setChatLoading(false);
   };
@@ -825,12 +840,21 @@ export default function Dashboard() {
             {/* ── AI CHAT ───────────────────────────────────────────────────── */}
             {activeTab === 'chat' && (
               <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl border border-purple-500/30 flex flex-col" style={{ height: 560 }}>
-                <div className="p-4 border-b border-purple-500/20 flex items-center gap-3">
-                  <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg"><MessageCircle className="w-5 h-5 text-white"/></div>
-                  <div>
-                    <h3 className="text-base font-bold text-white">AI Data Chat</h3>
-                    <p className="text-xs text-purple-300">Ask questions — Claude will answer in real-time</p>
+                <div className="p-4 border-b border-purple-500/20">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg"><MessageCircle className="w-5 h-5 text-white"/></div>
+                    <div>
+                      <h3 className="text-base font-bold text-white">AI Data Chat (Gemini)</h3>
+                      <p className="text-xs text-purple-300">Ask questions — Gemini will answer in real-time</p>
+                    </div>
                   </div>
+                  <input
+                    type="password"
+                    value={geminiKey}
+                    onChange={e => setGeminiKey(e.target.value)}
+                    placeholder="🔑 Apni Gemini API Key yahan paste karein..."
+                    className="w-full px-3 py-2 bg-slate-700/50 border border-yellow-500/40 rounded-lg text-white text-sm placeholder-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                  />
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {chatMessages.length === 0 && (
