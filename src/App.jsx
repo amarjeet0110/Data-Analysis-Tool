@@ -312,17 +312,20 @@ export default function Dashboard() {
         ...newMsgs.slice(1).map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }))
       ];
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey.trim()}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents })
-        }
-      );
+      const dataSummary = JSON.stringify(data.slice(0, 50));
+      const sys = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${dataSummary}\nTotal rows: ${data.length}\nAnswer clearly and precisely with numbers and insights. Always respond in English.`;
+
+      const res = await fetch('https://data-analysis-tool-xi.vercel.app/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system: sys,
+          messages: newMsgs.map(m => ({ role: m.role, content: m.content }))
+        })
+      });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error?.message || res.statusText); }
       const d = await res.json();
-      const reply = d.candidates?.[0]?.content?.parts?.[0]?.text || 'No response received.';
+      const reply = d.content?.[0]?.text || 'No response received.';
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       setSuggIdx(i => (i + 1) % chatSuggestions.length);
     } catch (e) {
