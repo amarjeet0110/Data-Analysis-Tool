@@ -93,10 +93,17 @@ export default function Dashboard() {
   // ── File Processing ────────────────────────────────────────────────────────
   const processFile = async (uploadedFile) => {
     setFile(uploadedFile);
-    setLoading(true);
-    setActiveTab('overview');
+    setData(null);
+    setHeaders([]);
+    setInsights([]);
+    setStats(null);
+    setDataQuality(null);
+    setAlerts([]);
+    setAiInsights([]);
     setReport('');
     setChatMessages([]);
+    setLoading(true);
+    setActiveTab('overview');
     try {
       let result;
       const n = uploadedFile.name.toLowerCase();
@@ -263,14 +270,14 @@ export default function Dashboard() {
     const sc = headers.find(c => ['sales','revenue','amount'].some(k => c.toLowerCase().includes(k)));
     if (sc) {
       const v = data.map(r => r[sc]).filter(n => typeof n === 'number');
-      kpis.push({ title: 'Total Sales', value: '₹' + _.sum(v).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: DollarSign, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
+      kpis.push({ title: 'Total Sales', value: '₹' + _.sum(v).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: TrendingUp, color: 'from-green-500 to-green-600', borderColor: 'border-green-500/30' });
       kpis.push({ title: 'Avg Order', value: '₹' + _.mean(v).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: ShoppingCart, color: 'from-sky-500 to-sky-600', borderColor: 'border-sky-500/30' });
     }
     const pc = headers.find(c => c.toLowerCase().includes('profit'));
     if (pc) {
       const v = data.map(r => r[pc]).filter(n => typeof n === 'number');
       const tot = _.sum(v);
-      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: '₹' + Math.abs(tot).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30' });
+      kpis.push({ title: tot >= 0 ? 'Total Profit' : 'Total Loss', value: '₹' + Math.abs(tot).toLocaleString('en-IN', { maximumFractionDigits: 0 }), icon: TrendingUp, color: tot >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-red-500 to-red-600', borderColor: tot >= 0 ? 'border-emerald-500/30' : 'border-red-500/30', prefix: '₹' });
     }
     const namc = headers.find(c => ['product','item','name'].some(k => c.toLowerCase().includes(k)));
     if (namc) kpis.push({ title: 'Total Products', value: new Set(data.map(r => r[namc])).size, icon: Package, color: 'from-purple-500 to-purple-600', borderColor: 'border-purple-500/30' });
@@ -475,21 +482,34 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Line Graph Animation */}
+              {/* Line Graph Animation - Slow Smooth Wave */}
               <div className="bg-slate-800/60 rounded-2xl p-5 mb-3 border border-purple-500/20">
                 <p className="text-xs text-purple-400 mb-3 uppercase tracking-widest">Loading Line Chart</p>
-                <svg viewBox="0 0 300 80" className="w-full" style={{height:70}}>
+                <svg viewBox="0 0 300 120" className="w-full" style={{height:110, overflow:'hidden'}}>
                   <defs>
-                    <linearGradient id="lg1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.4"/>
-                      <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0"/>
-                    </linearGradient>
+                    <style>{`
+                      @keyframes moveWave1 { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+                      @keyframes moveWave2 { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+                      @keyframes moveWave3 { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+                    `}</style>
                   </defs>
-                  <path d="M0,60 L25,45 L50,55 L75,30 L100,40 L125,20 L150,35 L175,15 L200,25 L225,10 L250,20 L275,8 L300,15" fill="none" stroke="#8b5cf6" strokeWidth="2.5" strokeDasharray="400" style={{animation:'lineDraw 2s ease-in-out infinite alternate'}}/>
-                  <path d="M0,60 L25,50 L50,65 L75,45 L100,55 L125,35 L150,50 L175,30 L200,42 L225,25 L250,38 L275,20 L300,30" fill="none" stroke="#ec4899" strokeWidth="2" strokeDasharray="400" style={{animation:'lineDraw 2s ease-in-out 0.4s infinite alternate'}}/>
-                  {[{x:75,y:30},{x:125,y:20},{x:175,y:15},{x:225,y:10},{x:275,y:8}].map((p,i)=>(
-                    <circle key={i} cx={p.x} cy={p.y} r="4" fill="#8b5cf6" style={{animation:`dotBounce 1.2s ease-in-out ${i*0.2}s infinite`}}/>
-                  ))}
+                  {/* Purple - slow large wave */}
+                  <g style={{animation:'moveWave1 4s linear infinite'}}>
+                    <path d="M0,60 C40,5 80,115 120,60 C160,5 200,115 240,60 C280,5 320,115 360,60 C400,5 440,115 480,60 C520,5 560,115 600,60"
+                      fill="none" stroke="#8b5cf6" strokeWidth="3" opacity="0.9"/>
+                  </g>
+                  {/* Pink - slightly offset slow wave */}
+                  <g style={{animation:'moveWave2 5.5s linear infinite'}}>
+                    <path d="M0,70 C40,15 80,115 120,70 C160,15 200,115 240,70 C280,15 320,115 360,70 C400,15 440,115 480,70 C520,15 560,115 600,70"
+                      fill="none" stroke="#ec4899" strokeWidth="2" opacity="0.6"/>
+                  </g>
+                  {/* Cyan - slowest wide wave */}
+                  <g style={{animation:'moveWave3 7s linear infinite'}}>
+                    <path d="M0,60 C50,20 100,100 150,60 C200,20 250,100 300,60 C350,20 400,100 450,60 C500,20 550,100 600,60"
+                      fill="none" stroke="#06b6d4" strokeWidth="1.5" opacity="0.4"/>
+                  </g>
+
+
                 </svg>
               </div>
 
