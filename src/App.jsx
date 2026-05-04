@@ -68,7 +68,7 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const geminiKey = 'AIzaSyD7Bn5UXhf06sQp8nt0Qe-ECWc8v9VNBic';
+  const geminiKey = 'AIzaSyCHKOr0DD82BeTASlWJPCx47EW0fEpCnII';
   const chatEndRef = useRef(null);
 
   const chatSuggestions = [
