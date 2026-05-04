@@ -1,6 +1,4 @@
-// File: /api/chat.js
-// Google Gemini API — BILKUL FREE (15 req/min, 1500/day)
-// Key lein: https://aistudio.google.com → Get API Key
+// File: /api/chat.js  ← GitHub repo ke root mein /api/ folder banao, andar ye file daalo
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
