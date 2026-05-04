@@ -68,7 +68,7 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const [geminiKey, setGeminiKey] = useState('');
+  const geminiKey = 'AIzaSyD7Bn5UXhf06sQp8nt0Qe-ECWc8v9VNBic';
   const chatEndRef = useRef(null);
 
   const chatSuggestions = [
@@ -840,21 +840,12 @@ export default function Dashboard() {
             {/* ── AI CHAT ───────────────────────────────────────────────────── */}
             {activeTab === 'chat' && (
               <div className="bg-gradient-to-br from-slate-800/80 to-purple-900/80 rounded-xl border border-purple-500/30 flex flex-col" style={{ height: 560 }}>
-                <div className="p-4 border-b border-purple-500/20">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg"><MessageCircle className="w-5 h-5 text-white"/></div>
-                    <div>
-                      <h3 className="text-base font-bold text-white">AI Data Chat (Gemini)</h3>
-                      <p className="text-xs text-purple-300">Ask questions — Gemini will answer in real-time</p>
-                    </div>
+                <div className="p-4 border-b border-purple-500/20 flex items-center gap-3">
+                  <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg"><MessageCircle className="w-5 h-5 text-white"/></div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">AI Data Chat (Gemini)</h3>
+                    <p className="text-xs text-purple-300">Ask questions — Gemini will answer in real-time</p>
                   </div>
-                  <input
-                    type="password"
-                    value={geminiKey}
-                    onChange={e => setGeminiKey(e.target.value)}
-                    placeholder="🔑 Apni Gemini API Key yahan paste karein..."
-                    className="w-full px-3 py-2 bg-slate-700/50 border border-yellow-500/40 rounded-lg text-white text-sm placeholder-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                  />
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {chatMessages.length === 0 && (
