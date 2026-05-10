@@ -30,21 +30,16 @@ const pearsonCorr = (a, b) => {
 };
 
 // ─── Claude API call ─────────────────────────────────────────────────────────
-const callClaude = async (messages, system = '') => {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system,
-      messages
-    })
-  });
-  const d = await res.json();
-  return d.content?.map(c => c.text || '').join('') || '';
-};
-
+const res = await fetch('/api/chat', {   // relative URL - same domain
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    systemPrompt: systemPrompt,
+    messages: messages
+  })
+});
+const d = await res.json();
+const reply = d.reply;
 export default function Dashboard() {
   // ── State ──────────────────────────────────────────────────────────────────
   const [file, setFile] = useState(null);
