@@ -10,20 +10,16 @@ export default async function handler(req, res) {
   const { system, prompt } = req.body;
 
   try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.groq_api}`, // Vercel env variable
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 1000,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: prompt },
-        ],
-      }),
+    const res = await fetch('/api/chat', {   // relative URL - same domain
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    systemPrompt: systemPrompt,
+    messages: messages
+  })
+});
+const d = await res.json();
+const reply = d.reply;
     });
 
     const data = await response.json();
