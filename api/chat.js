@@ -15,7 +15,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, // Vercel env variable
+        'Authorization': `Bearer ${process.env.groq_api}`, // Vercel env variable
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
