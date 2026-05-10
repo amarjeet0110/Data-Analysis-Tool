@@ -1,64 +1,36 @@
-// File: /api/chat.js  ← GitHub repo ke root mein /api/ folder banao, andar ye file daalo
-
+// FILE 1: api/chat.js
+// ─────────────────────────────────────────────
 export default async function handler(req, res) {
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  const { systemPrompt, messages } = req.body;
+
   try {
-    const { messages, system } = req.body;
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not set in Vercel env variables' });
-
-    // Claude format → Gemini format convert karo
-    const geminiMessages = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
-
-    // System prompt ko pehle user message mein add karo
-    if (system) {
-      geminiMessages.unshift({
-        role: 'user',
-        parts: [{ text: `System Instructions: ${system}` }]
-      });
-      geminiMessages.splice(1, 0, {
-        role: 'model',
-        parts: [{ text: 'Understood. I will follow these instructions.' }]
-      });
-    }
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: geminiMessages,
-          generationConfig: { maxOutputTokens: 1000, temperature: 0.7 }
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || 'Gemini API error' });
-    }
-
-    // Gemini response → Claude format mein convert karo
-    // (frontend ko same format milega, koi change nahi)
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
-    return res.status(200).json({
-      content: [{ type: 'text', text }]
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`, // Vercel env variable
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 1000,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+      }),
     });
 
-  } catch (error) {
-    console.error('API route error:', error);
-    return res.status(500).json({ error: 'Internal server error: ' + error.message });
+    const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content || 'No response.';
+    return res.status(200).json({ reply });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 }
