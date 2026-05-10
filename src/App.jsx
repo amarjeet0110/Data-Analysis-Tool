@@ -68,7 +68,7 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const groqKey = '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';
+  const VERCEL_API = 'https://your-actual-app.vercel.app';
   const chatEndRef = useRef(null);
 
   const chatSuggestions = [
