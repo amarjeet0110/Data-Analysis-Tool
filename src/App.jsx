@@ -30,17 +30,22 @@ const pearsonCorr = (a, b) => {
 };
 
 // ─── Claude API call ─────────────────────────────────────────────────────────
-const res = await fetch('/api/chat', {   // relative URL - same domain
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    systemPrompt: systemPrompt,
-    messages: messages
-  })
-});
-const d = await res.json();
-const reply = d.reply;
-export default function Dashboard() {
+const callClaude = async (messages, system = '') => {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system,
+      messages
+    })
+  });
+  const d = await res.json();
+  return d.content?.map(c => c.text || '').join('') || '';
+};
+
+export default function App() {
   // ── State ──────────────────────────────────────────────────────────────────
   const [file, setFile] = useState(null);
   const [data, setData] = useState(null);
@@ -63,7 +68,8 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-
+  // ✅ API key removed from frontend - now handled by backend
+  const GROQ_BACKEND = '/api/groq';
   const chatEndRef = useRef(null);
 
   const chatSuggestions = [
@@ -314,22 +320,21 @@ export default function Dashboard() {
         ...newMsgs.slice(1).map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }))
       ];
 
-        const dataSummary = JSON.stringify(data.slice(0, 50));
+      const dataSummary = JSON.stringify(data.slice(0, 50));
       const systemPrompt = `You are an expert data analyst. The user has uploaded this dataset:\nHeaders: ${headers.join(', ')}\nData sample (first 50 rows): ${dataSummary}\nTotal rows: ${data.length}\nAnswer clearly and precisely with numbers and insights. Always respond in English.`;
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch(GROQ_BACKEND, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
           system: systemPrompt,
-          messages: newMsgs.map(m => ({ role: m.role, content: m.content }))
+          messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
+          max_tokens: 1000,
         })
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error?.message || res.statusText); }
       const d = await res.json();
-      const reply = d.content?.map(c => c.text || '').join('') || 'No response received.';
+      const reply = d.choices?.[0]?.message?.content || 'No response received.';
       setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       setSuggIdx(i => (i + 1) % chatSuggestions.length);
     } catch (e) {
@@ -347,13 +352,17 @@ export default function Dashboard() {
       const dataSample = JSON.stringify(data.slice(0, 80));
       const sys = `You are a senior business analyst. Write a complete professional business analysis report strictly based on the data provided. Always respond in English.`;
       const prompt = `Based on the dataset below, write a complete professional business analysis report:\n\nDataset Info:\n- Total rows: ${data.length}\n- Columns: ${headers.join(', ')}\n- Statistics: ${JSON.stringify(s)}\n- Data sample (first 80 rows): ${dataSample}\n\nReport format:\n## 📊 Executive Summary\n## 🔍 Key Findings\n## 📈 Trend Analysis\n## ⚠️ Areas of Concern\n## 💡 Recommendations\n## ✅ Conclusion\n\nInclude specific numbers from the data in each section. Keep it professional, accurate, and concise.`;
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch(GROQ_BACKEND, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: sys, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({
+          system: sys,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 1000,
+        })
       });
       const d = await res.json();
-      const rep = d.content?.map(c => c.text || '').join('') || 'No report generated.';
+      const rep = d.choices?.[0]?.message?.content || 'No report generated.';
       setReport(rep);
     } catch (e) { setReport('❌ Error generating report. Please try again.'); }
     setReportLoading(false);
